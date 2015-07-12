@@ -833,41 +833,37 @@ static char **ads_pull_strvals(TALLOC_CTX *ctx, const char **in_vals)
 }
 
 /**
- * Do a search with paged results.  cookie must be null on the first
- *  call, and then returned on each subsequent call.  It will be null
- *  again when the entire search is complete 
+ * Do a search with arbitrary controls.
  * @param ads connection to ads server 
  * @param bind_path Base dn for the search
  * @param scope Scope of search (LDAP_SCOPE_BASE | LDAP_SCOPE_ONE | LDAP_SCOPE_SUBTREE)
  * @param expr Search expression - specified in local charset
  * @param attrs Attributes to retrieve - specified in utf8 or ascii
+ * @param scontrols ** which contains search controls - internal to this
+ *		       module and freed by caller
+ * @param ncontrols how many controls are there in scontrols
  * @param res ** which will contain results - free res* with ads_msgfree()
- * @param count Number of entries retrieved on this page
- * @param cookie The paged results cookie to be returned on subsequent calls
+ * @param rcontrols *** which contains response controls - free rcontrols**
+ *			with ldap_controls_free()
  * @return status of search
  **/
-static ADS_STATUS ads_do_paged_search_args(ADS_STRUCT *ads,
-					   const char *bind_path,
-					   int scope, const char *expr,
-					   const char **attrs, void *args,
-					   LDAPMessage **res, 
-					   int *count, struct berval **cookie)
+static ADS_STATUS ads_do_search_internal(ADS_STRUCT *ads, const char *bind_path,
+					 int scope, const char *expr,
+					 const char **attrs,
+					 LDAPControl **scontrols,
+					 LDAPMessage **res,
+					 LDAPControl ***rcontrols)
 {
-	int rc, i, version;
-	char *utf8_expr, *utf8_path, **search_attrs = NULL;
+	int rc;
+	char *utf8_expr = NULL, *utf8_path = NULL, **search_attrs = NULL;
 	size_t converted_size;
-	LDAPControl PagedResults, NoReferrals, ExternalCtrl, *controls[4], **rcontrols;
-	BerElement *cookie_be = NULL;
-	struct berval *cookie_bv= NULL;
-	BerElement *ext_be = NULL;
-	struct berval *ext_bv= NULL;
 
 	TALLOC_CTX *ctx;
-	ads_control *external_control = (ads_control *) args;
 
 	*res = NULL;
+	*rcontrols = NULL;
 
-	if (!(ctx = talloc_init("ads_do_paged_search_args")))
+	if (!(ctx = talloc_init("ads_do_search_internal")))
 		return ADS_ERROR(LDAP_NO_MEMORY);
 
 	/* 0 means the conversion worked but the result was empty 
@@ -880,9 +876,7 @@ static ADS_STATUS ads_do_paged_search_args(ADS_STRUCT *ads,
 		goto done;
 	}
 
-	if (!attrs || !(*attrs))
-		search_attrs = NULL;
-	else {
+	if (attrs && *attrs) {
 		/* This would be the utf8-encoded version...*/
 		/* if (!(search_attrs = ads_push_strvals(ctx, attrs))) */
 		if (!(search_attrs = str_list_copy(talloc_tos(), attrs))) {
@@ -891,97 +885,24 @@ static ADS_STATUS ads_do_paged_search_args(ADS_STRUCT *ads,
 		}
 	}
 
-	/* Paged results only available on ldap v3 or later */
-	ldap_get_option(ads->ldap.ld, LDAP_OPT_PROTOCOL_VERSION, &version);
-	if (version < LDAP_VERSION3) {
-		rc =  LDAP_NOT_SUPPORTED;
-		goto done;
-	}
-
-	cookie_be = ber_alloc_t(LBER_USE_DER);
-	if (*cookie) {
-		ber_printf(cookie_be, "{iO}", (ber_int_t) ads->config.ldap_page_size, *cookie);
-		ber_bvfree(*cookie); /* don't need it from last time */
-		*cookie = NULL;
-	} else {
-		ber_printf(cookie_be, "{io}", (ber_int_t) ads->config.ldap_page_size, "", 0);
-	}
-	ber_flatten(cookie_be, &cookie_bv);
-	PagedResults.ldctl_oid = discard_const_p(char, ADS_PAGE_CTL_OID);
-	PagedResults.ldctl_iscritical = (char) 1;
-	PagedResults.ldctl_value.bv_len = cookie_bv->bv_len;
-	PagedResults.ldctl_value.bv_val = cookie_bv->bv_val;
-
-	NoReferrals.ldctl_oid = discard_const_p(char, ADS_NO_REFERRALS_OID);
-	NoReferrals.ldctl_iscritical = (char) 0;
-	NoReferrals.ldctl_value.bv_len = 0;
-	NoReferrals.ldctl_value.bv_val = discard_const_p(char, "");
-
-	if (external_control && 
-	    (strequal(external_control->control, ADS_EXTENDED_DN_OID) || 
-	     strequal(external_control->control, ADS_SD_FLAGS_OID))) {
-
-		ExternalCtrl.ldctl_oid = discard_const_p(char, external_control->control);
-		ExternalCtrl.ldctl_iscritical = (char) external_control->critical;
-
-		/* win2k does not accept a ldctl_value beeing passed in */
-
-		if (external_control->val != 0) {
-
-			if ((ext_be = ber_alloc_t(LBER_USE_DER)) == NULL ) {
-				rc = LDAP_NO_MEMORY;
-				goto done;
-			}
-
-			if ((ber_printf(ext_be, "{i}", (ber_int_t) external_control->val)) == -1) {
-				rc = LDAP_NO_MEMORY;
-				goto done;
-			}
-			if ((ber_flatten(ext_be, &ext_bv)) == -1) {
-				rc = LDAP_NO_MEMORY;
-				goto done;
-			}
-
-			ExternalCtrl.ldctl_value.bv_len = ext_bv->bv_len;
-			ExternalCtrl.ldctl_value.bv_val = ext_bv->bv_val;
-
-		} else {
-			ExternalCtrl.ldctl_value.bv_len = 0;
-			ExternalCtrl.ldctl_value.bv_val = NULL;
-		}
-
-		controls[0] = &NoReferrals;
-		controls[1] = &PagedResults;
-		controls[2] = &ExternalCtrl;
-		controls[3] = NULL;
-
-	} else {
-		controls[0] = &NoReferrals;
-		controls[1] = &PagedResults;
-		controls[2] = NULL;
-	}
-
 	/* we need to disable referrals as the openldap libs don't
 	   handle them and paged results at the same time.  Using them
-	   together results in the result record containing the server 
-	   page control being removed from the result list (tridge/jmcd) 
+	   together results in the result record containing the server
+	   page control being removed from the result list (tridge/jmcd)
 
 	   leaving this in despite the control that says don't generate
 	   referrals, in case the server doesn't support it (jmcd)
 	*/
 	ldap_set_option(ads->ldap.ld, LDAP_OPT_REFERRALS, LDAP_OPT_OFF);
 
-	rc = ldap_search_with_timeout(ads->ldap.ld, utf8_path, scope, utf8_expr, 
-				      search_attrs, 0, controls,
-				      NULL, LDAP_NO_LIMIT,
-				      (LDAPMessage **)res);
-
-	ber_free(cookie_be, 1);
-	ber_bvfree(cookie_bv);
+	rc = ldap_search_with_timeout(ads->ldap.ld, utf8_path, scope, utf8_expr,
+				      search_attrs, 0, scontrols, NULL,
+				      LDAP_NO_LIMIT, (LDAPMessage **)res);
 
 	if (rc) {
-		DEBUG(3,("ads_do_paged_search_args: ldap_search_with_timeout(%s) -> %s\n", expr,
-			 ldap_err2string(rc)));
+		DEBUG(3, ("ads_do_search_internal: "
+			  "ldap_search_with_timeout(%s) -> %s\n",
+			  expr, ldap_err2string(rc)));
 		if (rc == LDAP_OTHER) {
 			char *ldap_errmsg;
 			int ret;
@@ -1004,7 +925,138 @@ static ADS_STATUS ads_do_paged_search_args(ADS_STRUCT *ads,
 	}
 
 	rc = ldap_parse_result(ads->ldap.ld, *res, NULL, NULL, NULL,
-					NULL, &rcontrols,  0);
+					NULL, rcontrols,  0);
+
+done:
+	talloc_destroy(ctx);
+
+	if (rc != LDAP_SUCCESS && *res != NULL) {
+		ads_msgfree(ads, *res);
+		*res = NULL;
+	}
+
+	/* if/when we decide to utf8-encode attrs, take out this next line */
+	TALLOC_FREE(search_attrs);
+
+	return ADS_ERROR(rc);
+}
+
+
+/**
+ * Do a search with paged results.  cookie must be null on the first
+ *  call, and then returned on each subsequent call.  It will be null
+ *  again when the entire search is complete
+ * @param ads connection to ads server
+ * @param bind_path Base dn for the search
+ * @param scope Scope of search (LDAP_SCOPE_BASE | LDAP_SCOPE_ONE | LDAP_SCOPE_SUBTREE)
+ * @param expr Search expression - specified in local charset
+ * @param attrs Attributes to retrieve - specified in utf8 or ascii
+ * @param args An additional user-defined control
+ * @param res ** which will contain results - free res* with ads_msgfree()
+ * @param count Number of entries retrieved on this page
+ * @param cookie The paged results cookie to be returned on subsequent calls
+ * @return status of search
+ **/
+static ADS_STATUS ads_do_paged_search_args(ADS_STRUCT *ads,
+					   const char *bind_path,
+					   int scope, const char *expr,
+					   const char **attrs, void *args,
+					   LDAPMessage **res,
+					   int *count, struct berval **cookie)
+{
+	int i, version;
+	ADS_STATUS rc;
+	LDAPControl NoReferrals, PagedResults, ExternalCtrl, *controls[4],
+	    **rcontrols;
+	BerElement *cookie_be = NULL;
+	struct berval *cookie_bv= NULL;
+	BerElement *ext_be = NULL;
+	struct berval *ext_bv = NULL;
+
+	ads_control *external_control = (ads_control *)args;
+
+	/* Paged results only available on ldap v3 or later */
+	ldap_get_option(ads->ldap.ld, LDAP_OPT_PROTOCOL_VERSION, &version);
+	if (version < LDAP_VERSION3) {
+		rc =  ADS_ERROR(LDAP_NOT_SUPPORTED);
+		goto done;
+	}
+
+	NoReferrals.ldctl_oid = discard_const_p(char, ADS_NO_REFERRALS_OID);
+	NoReferrals.ldctl_iscritical = (char)0;
+	NoReferrals.ldctl_value.bv_len = 0;
+	NoReferrals.ldctl_value.bv_val = discard_const_p(char, "");
+
+	controls[0] = &NoReferrals;
+
+	cookie_be = ber_alloc_t(LBER_USE_DER);
+	if (*cookie) {
+		ber_printf(cookie_be, "{iO}", (ber_int_t) ads->config.ldap_page_size, *cookie);
+		ber_bvfree(*cookie); /* don't need it from last time */
+		*cookie = NULL;
+	} else {
+		ber_printf(cookie_be, "{io}", (ber_int_t) ads->config.ldap_page_size, "", 0);
+	}
+	ber_flatten(cookie_be, &cookie_bv);
+	PagedResults.ldctl_oid = discard_const_p(char, ADS_PAGE_CTL_OID);
+	PagedResults.ldctl_iscritical = (char) 1;
+	PagedResults.ldctl_value.bv_len = cookie_bv->bv_len;
+	PagedResults.ldctl_value.bv_val = cookie_bv->bv_val;
+
+	controls[1] = &PagedResults;
+
+	if (external_control &&
+	    (strequal(external_control->control, ADS_EXTENDED_DN_OID) ||
+	     strequal(external_control->control, ADS_SD_FLAGS_OID))) {
+
+		ExternalCtrl.ldctl_oid =
+		    discard_const_p(char, external_control->control);
+		ExternalCtrl.ldctl_iscritical =
+		    (char)external_control->critical;
+
+		/* win2k does not accept a ldctl_value beeing passed in */
+
+		if (external_control->val != 0) {
+
+			if ((ext_be = ber_alloc_t(LBER_USE_DER)) == NULL) {
+				rc = ADS_ERROR(LDAP_NO_MEMORY);
+				goto done;
+			}
+
+			if ((ber_printf(ext_be, "{i}",
+					(ber_int_t)external_control->val)) ==
+			    -1) {
+				rc = ADS_ERROR(LDAP_NO_MEMORY);
+				goto done;
+			}
+			if ((ber_flatten(ext_be, &ext_bv)) == -1) {
+				rc = ADS_ERROR(LDAP_NO_MEMORY);
+				goto done;
+			}
+
+			ExternalCtrl.ldctl_value.bv_len = ext_bv->bv_len;
+			ExternalCtrl.ldctl_value.bv_val = ext_bv->bv_val;
+
+		} else {
+			ExternalCtrl.ldctl_value.bv_len = 0;
+			ExternalCtrl.ldctl_value.bv_val = NULL;
+		}
+
+		controls[2] = &ExternalCtrl;
+		controls[3] = NULL;
+	} else {
+		controls[2] = NULL;
+	}
+
+	rc = ads_do_search_internal(ads, bind_path, scope, expr, attrs,
+				    controls, res, &rcontrols);
+
+	ber_free(cookie_be, 1);
+	ber_bvfree(cookie_bv);
+
+	if (!ADS_ERR_OK(rc)) {
+		goto done;
+	}
 
 	if (!rcontrols) {
 		goto done;
@@ -1029,8 +1081,6 @@ static ADS_STATUS ads_do_paged_search_args(ADS_STRUCT *ads,
 	ldap_controls_free(rcontrols);
 
 done:
-	talloc_destroy(ctx);
-
 	if (ext_be) {
 		ber_free(ext_be, 1);
 	}
@@ -1039,15 +1089,7 @@ done:
 		ber_bvfree(ext_bv);
 	}
 
-	if (rc != LDAP_SUCCESS && *res != NULL) {
-		ads_msgfree(ads, *res);
-		*res = NULL;
-	}
-
-	/* if/when we decide to utf8-encode attrs, take out this next line */
-	TALLOC_FREE(search_attrs);
-
-	return ADS_ERROR(rc);
+	return rc;
 }
 
 static ADS_STATUS ads_do_paged_search(ADS_STRUCT *ads, const char *bind_path,
