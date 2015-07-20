@@ -2459,7 +2459,7 @@ static bool pdb_default_is_responsible_for_builtin(
 static bool pdb_default_is_responsible_for_wellknown(
 					struct pdb_methods *methods)
 {
-	return false;
+	return true;
 }
 
 static bool pdb_default_is_responsible_for_unix_users(
