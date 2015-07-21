@@ -1,0 +1,29 @@
+<samba:parameter name="winbind additional group sids"
+                 context="G"
+				 type="list"
+                 xmlns:samba="http://www.samba.org/samba/DTD/samba-doc">
+<description>
+    <para>This is a list of additional Windows Security Identifiers
+    (SIDs) that represents group aliases that every user is a member
+    of. It is used by <citerefentry><refentrytitle>winbindd
+    </refentrytitle><manvolnum>8</manvolnum></citerefentry> while
+    calculating the list of UNIX groups a user is a member of
+    (e.g. on behalf of the winbind NSS plugin).</para>
+
+    <para>Adding those SIDs is analogous to the way
+    <citerefentry><refentrytitle>smbd</refentrytitle>
+    <manvolnum>8</manvolnum></citerefentry> builds a process token for
+    an authenticated domain user - it obtains a list of SIDs
+    from the domain controller, adds some well known SIDs (e.g.
+    S-1-5-11 for NT Authority\Authenticated Users) and then
+    converts the whole list to UNIX group IDs.</para>
+
+    <para>To be useful, the SIDs listed by this parameter must also
+    have a group mapping, that would convert the SIDs to UNIX gids.
+    </para>
+
+</description>
+
+<value type="default"/>
+<value type="example">S-1-1-0</value>
+</samba:parameter>
