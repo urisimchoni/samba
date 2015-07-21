@@ -197,6 +197,8 @@ static void wb_gettoken_gotbuiltins(struct tevent_req *subreq)
 	uint32_t num_rids;
         uint32_t *rids;
 	NTSTATUS status;
+	const char **additionals;
+	uint32_t num_additionals;
 
 	status = wb_lookupuseraliases_recv(subreq, state, &num_rids, &rids);
 	TALLOC_FREE(subreq);
@@ -208,6 +210,35 @@ static void wb_gettoken_gotbuiltins(struct tevent_req *subreq)
 	if (tevent_req_nterror(req, status)) {
 		return;
 	}
+
+	/*
+	 * Now add additional SIDs from smb.conf
+	 */
+	num_additionals = 0;
+	for (additionals = lp_winbind_additional_group_sids();
+	     additionals != NULL && *additionals != NULL; ++additionals) {
+		++num_additionals;
+	}
+
+	if (num_additionals > 0) {
+		struct dom_sid *sids;
+
+		sids = talloc_realloc(state, state->sids, struct dom_sid,
+				      state->num_sids + num_additionals);
+		if (tevent_req_nomem(sids, req)) {
+			return;
+		}
+
+		for (additionals = lp_winbind_additional_group_sids();
+		     *additionals != NULL; ++additionals) {
+			if (string_to_sid(&sids[state->num_sids],
+					  *additionals)) {
+				state->num_sids += 1;
+			}
+		}
+		state->sids = sids;
+	}
+
 	tevent_req_done(req);
 }
 
