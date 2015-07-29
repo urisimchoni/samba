@@ -430,6 +430,7 @@ plantestsuite("samba4.blackbox.client_etypes_legacy(ad_dc:client)", "ad_dc:clien
 plantestsuite("samba4.blackbox.client_etypes_strong(ad_dc:client)", "ad_dc:client", [os.path.join(bbdir, "test_client_etypes.sh"), '$DC_SERVER', '$DC_USERNAME', '$DC_PASSWORD', '$PREFIX_ABS', 'strong', '17_18'])
 plantestsuite("samba4.blackbox.net_ads_dns(ad_member:local)", "ad_member:local", [os.path.join(bbdir, "test_net_ads_dns.sh"), '$DC_SERVER', '$DC_USERNAME', '$DC_PASSWORD', '$REALM', '$USERNAME', '$PASSWORD'])
 plantestsuite_loadlist("samba4.rpc.echo against NetBIOS alias", "ad_dc_ntvfs", [valgrindify(smbtorture4), "$LISTOPT", "$LOADLIST", 'ncacn_np:$NETBIOSALIAS', '-U$DOMAIN/$USERNAME%$PASSWORD', 'rpc.echo'])
+plantestsuite("samba4.blackbox.net_ads_search(ad_member:local)", "ad_member:local", [os.path.join(bbdir, "test_net_ads_search.sh"), '$DOMAIN', '$REALM', '$DC_USERNAME', '$DC_PASSWORD', "$PREFIX/ad_member"])
 
 # Tests using the "Simple" NTVFS backend
 for t in ["base.rw1"]:
