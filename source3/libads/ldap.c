@@ -941,6 +941,149 @@ done:
 	return ADS_ERROR(rc);
 }
 
+/**
+ * Build LDAP controls to be used in next LDAP query according to the search
+ * retrieval context
+ *
+ * @param ctx - search context
+ * @param ads - connection to server
+ * @param[out] scontrols - a talloc'd array of controls for the query
+ * @return status code
+ */
+static ADS_STATUS ads_gsearch_build_controls(struct ads_search_ctx *ctx,
+					     ADS_STRUCT *ads,
+					     LDAPControl ***scontrols)
+{
+	return ctx->retrv_ops->build_controls(ctx, ads, scontrols);
+}
+
+/**
+ * Analyze returning LDAP controls and prepare for next query in a multi-query
+ * search
+ *
+ * On success, cont indicates whether to do another query.
+ * On failure, cont indicates whether retry is allowed (protocol-related
+ * errors)
+ * @param ctx - search context
+ * @param ads - connection to server
+ * @param rcontrols - returning controls from last query. Ownership remains at
+ *                    caller.
+ * @param[out] cont - whether to continue to next round trip
+ * @return status code
+ **/
+static ADS_STATUS ads_gsearch_cont(struct ads_search_ctx *ctx, ADS_STRUCT *ads,
+				   LDAPControl **rcontrols, bool *cont)
+{
+	return ctx->retrv_ops->cont(ctx, ads, rcontrols, cont);
+}
+
+/**
+ * Process last query results
+ *
+ * @param ctx - search context
+ * @param ads - connection to server
+ * @param msg - returning message. Ownership is transferred to callee.
+ * @param[out] cont - whether to continue to next query in a multi-query
+ *                    search (if the retrieval policy mandates it).
+ *                    Defaults to true.
+ * @return status code
+ **/
+static ADS_STATUS ads_gsearch_process_msg(struct ads_search_ctx *ctx,
+					  ADS_STRUCT *ads, LDAPMessage *msg,
+					  bool *cont)
+{
+	return ctx->process_ops->process_msg(ctx, ads, msg, cont);
+}
+
+/**
+ * Do an LDAP search using custom retrieval policy, message
+ * processing policy, and retry policy.
+ * This is the "swiss-army-knife" of searching, but instead
+ * of directly supporting all possible combinations in function
+ * parameters, it delegates each aspect of the search to a policy object.
+ *
+ * @param ads connection to ads server
+ * @param bind_path Base dn for the search
+ * @param scope Scope of search (LDAP_SCOPE_BASE | LDAP_SCOPE_ONE |
+ *              LDAP_SCOPE_SUBTREE)
+ * @param expr Search expression - specified in local charset
+ * @param attrs Attributes to retrieve - specified in utf8 or ascii
+ * @param search_ctx - encapsulates the retrieval, processing, and
+ *                     retry aspects of the search
+ * @return status of search
+ **/
+ADS_STATUS ads_generic_search(ADS_STRUCT *ads, const char *bind_path, int scope,
+			      const char *expr, const char **attrs,
+			      struct ads_search_ctx *search_ctx)
+{
+	LDAPControl **scontrols = NULL, **rcontrols = NULL;
+	LDAPMessage *msg = NULL;
+	ADS_STATUS status;
+	bool retrv_cont, process_cont;
+
+	DEBUG(10, ("%s: bind path = '%s' scope = %d filter = '%s' retrieval = "
+		   "%s processing = %s\n",
+		   __func__, bind_path, scope, expr,
+		   search_ctx->retrv_ops->name, search_ctx->process_ops->name));
+
+	do {
+		/* Fixme: support retry */
+		status =
+		    ads_gsearch_build_controls(search_ctx, ads, &scontrols);
+		if (!ADS_ERR_OK(status)) {
+			DEBUG(3, ("building controls failed - %s\n",
+				  ads_errstr(status)));
+			goto done;
+		}
+
+		status =
+		    ads_do_search_internal(ads, bind_path, scope, expr, attrs,
+					   scontrols, &msg, &rcontrols);
+		if (!ADS_ERR_OK(status)) {
+			DEBUG(3, ("query failed - %s\n", ads_errstr(status)));
+			goto done;
+		}
+		TALLOC_FREE(scontrols);
+
+		status = ads_gsearch_cont(search_ctx, ads, rcontrols,
+					  &retrv_cont);
+		if (!ADS_ERR_OK(status)) {
+			DEBUG(3, ("cont failed - %s\n",
+				  ads_errstr(status)));
+		}
+
+		ldap_controls_free(rcontrols);
+		rcontrols = NULL;
+
+		process_cont = true;
+		status = ads_gsearch_process_msg(search_ctx, ads, msg,
+						 &process_cont);
+		if (!ADS_ERR_OK(status)) {
+			DEBUG(3, ("process message  failed - %s\n",
+				  ads_errstr(status)));
+			goto done;
+		}
+		msg = NULL;
+	} while (retrv_cont && process_cont);
+
+done:
+	TALLOC_FREE(scontrols);
+	if (rcontrols) {
+		ldap_controls_free(rcontrols);
+	}
+	if (msg) {
+		ldap_msgfree(msg);
+	}
+
+	return status;
+}
+
+void ads_destroy_search_context(struct ads_search_ctx *search_ctx)
+{
+	TALLOC_FREE(search_ctx->process_ctx);
+	TALLOC_FREE(search_ctx->retrieval_ctx);
+	ZERO_STRUCTP(search_ctx);
+}
 
 /**
  * Do a search with paged results.  cookie must be null on the first

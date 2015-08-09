@@ -29,6 +29,70 @@ int ldap_init_fd(ber_socket_t fd, int proto, char *uri, LDAP **ldp);
 #endif
 
 /*
+ * Backend interface to generic LDAP search mechanism
+ *
+ * There seem to be a lot of variations on the basic LDAP search
+ * theme:
+ * - A search can consist of one query or multiple queries to
+ *   obtain all results (using PagedControl)
+ * - Virtual List View (VLV) control can be used to selectively
+ *   retrieve part of the result set.
+ * - In a multi-query search, result messages can be accumulated
+ *   or processed one-by-one as they are retrieved.
+ * - On failure, the operation can fail or retried by re-connecting
+ *   to the AD server.
+ * - Other LDAP controls can be added for backend processing.
+ *
+ * Supporting all those options and all their combinations leads to
+ * a myriad of LDAP search functions and to duplication of code.
+ *
+ * To avoid that, we divide the various aspects of the search into
+ * three facets:
+ * 1. Retrieval policy (which contorl to use and how to use them)
+ * 2. Processing policy (what to do with returned messages)
+ * 3. Retry policy (whether or not to retry, how many retries)
+ *
+ * This division allows a mix-and-match of policies without
+ * duplication of code. The interfaces below define how the
+ * message processing policy and the retrieval policy talk to
+ * the generic search function. Typical usage is:
+ * 1. Construct retrieval policy and processing policy objects
+ * 2. Call the generic search function ads_generic_search().
+ *    ads_generic_search() converses with the policy objects
+ *    and they also update their state according to search
+ *    results.
+ * 3. If needed, extract information from the policy objects
+ *
+ * For common uses (e.g. get all results with retry) a wrapper
+ * can be made for this process for convenience.
+**/
+
+struct ads_search_ctx;
+
+typedef bool (*ads_ldap_msg_process_fn)(ADS_STRUCT *, char *, void **, void *);
+
+struct ads_search_process_ops {
+	const char *name;
+	ADS_STATUS (*process_msg)(struct ads_search_ctx *ctx, ADS_STRUCT *ads,
+				  LDAPMessage *msg, bool *cont);
+};
+
+struct ads_search_retrv_ops {
+	const char *name;
+	ADS_STATUS (*build_controls)(struct ads_search_ctx *ctx,
+				     ADS_STRUCT *ads, LDAPControl ***scontrols);
+	ADS_STATUS (*cont)(struct ads_search_ctx *ctx, ADS_STRUCT *ads,
+			   LDAPControl **rcontrols, bool *cont);
+};
+
+struct ads_search_ctx {
+	struct ads_search_retrv_ops *retrv_ops;
+	struct ads_search_process_ops *process_ops;
+	void *retrieval_ctx;
+	void *process_ctx;
+};
+
+/*
  * Prototypes for ads
  */
 
@@ -112,6 +176,11 @@ void ads_process_results(ADS_STRUCT *ads, LDAPMessage *res,
 			 bool (*fn)(ADS_STRUCT *,char *, void **, void *),
 			 void *data_area);
 void ads_dump(ADS_STRUCT *ads, LDAPMessage *res);
+
+ADS_STATUS ads_generic_search(ADS_STRUCT *ads, const char *bind_path, int scope,
+			      const char *expr, const char **attrs,
+			      struct ads_search_ctx *search_ctx);
+void ads_destroy_search_context(struct ads_search_ctx *search_ctx);
 
 struct GROUP_POLICY_OBJECT;
 ADS_STATUS ads_parse_gpo(ADS_STRUCT *ads,
