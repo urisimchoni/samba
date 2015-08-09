@@ -181,6 +181,12 @@ ADS_STATUS ads_generic_search(ADS_STRUCT *ads, const char *bind_path, int scope,
 			      const char *expr, const char **attrs,
 			      struct ads_search_ctx *search_ctx);
 void ads_destroy_search_context(struct ads_search_ctx *search_ctx);
+ADS_STATUS ads_create_vlv_retrieval_context(
+    TALLOC_CTX *mem_ctx, const char *sort_attr, uint32_t from, uint32_t count,
+    uint32_t table_size, DATA_BLOB context, struct ads_search_ctx *ctx);
+void ads_recv_vlv_retrieval_context(struct ads_search_ctx *ctx,
+				    DATA_BLOB *search_context, uint32_t *from,
+				    uint32_t *table_size, uint32_t *error_code);
 
 struct GROUP_POLICY_OBJECT;
 ADS_STATUS ads_parse_gpo(ADS_STRUCT *ads,
