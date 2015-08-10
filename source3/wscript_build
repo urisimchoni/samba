@@ -540,6 +540,7 @@ bld.SAMBA3_LIBRARY('ads',
                           libads/ldap_utils.c
                           libads/ldap_schema.c
                           libads/ldap_ctrl.c
+                          libads/ldap_process.c
                           libads/util.c
                           libads/ndr.c
                           ''',
