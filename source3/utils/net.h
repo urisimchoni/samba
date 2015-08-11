@@ -93,6 +93,8 @@ struct net_context {
 	struct messaging_context *msg_ctx;
 	struct netlogon_creds_cli_context *netlogon_creds;
 
+	const char *opt_vlv_params;
+
 	bool display_usage;
 	void *private_data;
 };

@@ -39,6 +39,7 @@
 #include "libsmb/libsmb.h"
 #include "lib/param/loadparm.h"
 #include "utils/net_dns.h"
+#include "lib/util/base64.h"
 
 #ifdef HAVE_ADS
 
@@ -434,7 +435,16 @@ static int net_ads_workgroup(struct net_context *c, int argc, const char **argv)
 	return 0;
 }
 
-
+static bool conv_str_u32(const char *s, uint32_t *u)
+{
+	uint64_t temp;
+	if (!conv_str_u64(s, &temp))
+		return false;
+	if (temp > UINT32_MAX)
+		return false;
+	*u = (uint32_t)temp;
+	return true;
+}
 
 static bool usergrp_display(ADS_STRUCT *ads, char *field, void **values, void *data_area)
 {
@@ -462,6 +472,163 @@ static bool usergrp_display(ADS_STRUCT *ads, char *field, void **values, void *d
 	if (strcasecmp_m(field, "description") == 0)
 		disp_fields[1] = SMB_STRDUP((char *) values[0]);
 	return true;
+}
+
+static bool parse_vlv_params(TALLOC_CTX *mem_ctx, const char *vlv,
+			     uint32_t *from, uint32_t *count,
+			     uint32_t *table_size, DATA_BLOB *context)
+{
+	char *str = talloc_strdup(mem_ctx, vlv);
+	char *tok;
+	bool rc = false;
+
+	if (!str) {
+		d_fprintf(stderr, _("internal error: %s\n"),
+			  ads_errstr(ADS_ERROR(LDAP_NO_MEMORY)));
+		return false;
+	}
+
+	tok = strtok(str, ":");
+	if (tok == NULL) {
+		goto out;
+	}
+	if (!conv_str_u32(tok, from)) {
+		goto out;
+	}
+
+	tok = strtok(NULL, ":");
+	if (tok == NULL) {
+		goto out;
+	}
+	if (!conv_str_u32(tok, count)) {
+		goto out;
+	}
+
+	tok = strtok(NULL, ":");
+	if (tok == NULL) {
+		goto out;
+	}
+	if (!conv_str_u32(tok, table_size)) {
+		goto out;
+	}
+
+	*context = data_blob_null;
+	tok = strtok(NULL, ":");
+	if (tok != NULL && *tok != '\0') {
+		*context = base64_decode_data_blob_talloc(mem_ctx, tok);
+	}
+
+	rc = true;
+
+out:
+	TALLOC_FREE(str);
+
+	if (!rc) {
+		d_fprintf(stderr, _("invalid VLV syntax. use "
+				    "from:count:table-size[:context]\n"));
+	}
+
+	return rc;
+}
+
+static ADS_STATUS prepare_search_retrieval(TALLOC_CTX *mem_ctx,
+					   struct net_context *c,
+					   struct ads_search_ctx *ctx)
+{
+	ADS_STATUS status;
+
+	if (c->opt_vlv_params) {
+		uint32_t from, count, table_size;
+		DATA_BLOB context;
+		if (!parse_vlv_params(mem_ctx, c->opt_vlv_params, &from, &count,
+				      &table_size, &context)) {
+			return ADS_ERROR_SYSTEM(EINVAL);
+		}
+
+		status = ads_create_vlv_retrieval_context(
+		    mem_ctx, "sAMAccountName", from, count, table_size, context,
+		    ctx);
+		data_blob_free(&context);
+	} else {
+		status = ads_create_paged_retrieval_context(mem_ctx, ctx);
+	}
+
+	if (!ADS_ERR_OK(status)) {
+		d_fprintf(stderr, _("internal error: %s\n"),
+			  ads_errstr(status));
+	}
+
+	return status;
+}
+
+static ADS_STATUS prepare_ug_search(TALLOC_CTX *mem_ctx, struct net_context *c,
+				    struct ads_search_ctx *ctx,
+				    char **disp_fields)
+{
+	ADS_STATUS status;
+
+	ZERO_STRUCTP(ctx);
+
+	status = ads_create_callback_process_context(mem_ctx, usergrp_display,
+						     disp_fields, ctx);
+	if (!ADS_ERR_OK(status)) {
+		goto err;
+	}
+
+	status = prepare_search_retrieval(mem_ctx, c, ctx);
+	if (!ADS_ERR_OK(status)) {
+		goto err;
+	}
+
+	return ADS_SUCCESS;
+
+err:
+	ads_destroy_search_context(ctx);
+	return status;
+}
+
+static ADS_STATUS finalize_search_retrv(TALLOC_CTX *mem_ctx,
+					struct net_context *c,
+					struct ads_search_ctx *ctx)
+{
+	if (c->opt_vlv_params) {
+		uint32_t err_code, actual_from, table_size;
+		DATA_BLOB context;
+		char *context_str = NULL;
+
+		ads_recv_vlv_retrieval_context(ctx, &context, &actual_from,
+					       &table_size, &err_code);
+
+		if (context.data != NULL) {
+			context_str = base64_encode_data_blob(mem_ctx, context);
+			if (context_str == NULL) {
+				return ADS_ERROR(LDAP_NO_MEMORY);
+			}
+		}
+
+		if (err_code == 0) {
+			d_printf(_("VLV meta-data:\n"));
+			d_printf(_("First returned entry: %u\n"), actual_from);
+			d_printf(_("Total entries: %u\n"), table_size);
+			d_printf(_("VLV context: %s\n"),
+				 context_str ? context_str : "");
+		} else {
+			d_fprintf(stderr, _("VLV search failed with error %d\n"),
+				 err_code);
+			TALLOC_FREE(context_str);
+			return ADS_ERROR(LDAP_NO_RESULTS_RETURNED);
+		}
+
+		TALLOC_FREE(context_str);
+	}
+
+	return ADS_SUCCESS;
+}
+
+static ADS_STATUS finalize_ug_search(TALLOC_CTX *mem_ctx, struct net_context *c,
+				     struct ads_search_ctx *ctx)
+{
+	return finalize_search_retrv(mem_ctx, c, ctx);
 }
 
 static int net_ads_user_usage(struct net_context *c, int argc, const char **argv)
@@ -726,37 +893,49 @@ int net_ads_user(struct net_context *c, int argc, const char **argv)
 	const char *shortattrs[] = {"sAMAccountName", NULL};
 	const char *longattrs[] = {"sAMAccountName", "description", NULL};
 	char *disp_fields[2] = {NULL, NULL};
+	struct ads_search_ctx search_ctx = {.retrv_ops = NULL};
 
-	if (argc == 0) {
-		if (c->display_usage) {
-			d_printf(  "%s\n"
-			           "net ads user\n"
-				   "    %s\n",
-				 _("Usage:"),
-				 _("List AD users"));
-			net_display_usage_from_functable(func);
-			return 0;
-		}
-
-		if (!ADS_ERR_OK(ads_startup(c, false, &ads))) {
-			return -1;
-		}
-
-		if (c->opt_long_list_entries)
-			d_printf(_("\nUser name             Comment"
-				   "\n-----------------------------\n"));
-
-		rc = ads_do_search_all_fn(ads, ads->config.bind_path,
-					  LDAP_SCOPE_SUBTREE,
-					  "(objectCategory=user)",
-					  c->opt_long_list_entries ? longattrs :
-					  shortattrs, usergrp_display,
-					  disp_fields);
-		ads_destroy(&ads);
-		return ADS_ERR_OK(rc) ? 0 : -1;
+	if (argc != 0) {
+		return net_run_function(c, argc, argv, "net ads user", func);
 	}
 
-	return net_run_function(c, argc, argv, "net ads user", func);
+	if (c->display_usage) {
+		d_printf("%s\n"
+			 "net ads user\n"
+			 "    %s\n",
+			 _("Usage:"), _("List AD users"));
+		net_display_usage_from_functable(func);
+		return 0;
+	}
+
+	if (!ADS_ERR_OK(ads_startup(c, false, &ads))) {
+		return -1;
+	}
+
+	if (c->opt_long_list_entries)
+		d_printf(_("\nUser name             Comment"
+			   "\n-----------------------------\n"));
+
+	rc = prepare_ug_search(talloc_tos(), c, &search_ctx, disp_fields);
+	if (!ADS_ERR_OK(rc)) {
+		goto out;
+	}
+
+	rc = ads_generic_search(
+	    ads, ads->config.bind_path, LDAP_SCOPE_SUBTREE,
+	    "(objectCategory=user)",
+	    c->opt_long_list_entries ? longattrs : shortattrs, &search_ctx);
+	if (!ADS_ERR_OK(rc)) {
+		d_fprintf(stderr, _("%s\n"), ads_errstr(rc));
+		goto out;
+	}
+
+	rc = finalize_ug_search(talloc_tos(), c, &search_ctx);
+
+out:
+	ads_destroy_search_context(&search_ctx);
+	ads_destroy(&ads);
+	return ADS_ERR_OK(rc) ? 0 : -1;
 }
 
 static int net_ads_group_usage(struct net_context *c, int argc, const char **argv)
@@ -879,36 +1058,50 @@ int net_ads_group(struct net_context *c, int argc, const char **argv)
 	const char *shortattrs[] = {"sAMAccountName", NULL};
 	const char *longattrs[] = {"sAMAccountName", "description", NULL};
 	char *disp_fields[2] = {NULL, NULL};
+	struct ads_search_ctx search_ctx = {.retrv_ops = NULL};
 
-	if (argc == 0) {
-		if (c->display_usage) {
-			d_printf(  "%s\n"
-				   "net ads group\n"
-				   "    %s\n",
-				 _("Usage:"),
-				 _("List AD groups"));
-			net_display_usage_from_functable(func);
-			return 0;
-		}
-
-		if (!ADS_ERR_OK(ads_startup(c, false, &ads))) {
-			return -1;
-		}
-
-		if (c->opt_long_list_entries)
-			d_printf(_("\nGroup name            Comment"
-				   "\n-----------------------------\n"));
-		rc = ads_do_search_all_fn(ads, ads->config.bind_path,
-					  LDAP_SCOPE_SUBTREE,
-					  "(objectCategory=group)",
-					  c->opt_long_list_entries ? longattrs :
-					  shortattrs, usergrp_display,
-					  disp_fields);
-
-		ads_destroy(&ads);
-		return ADS_ERR_OK(rc) ? 0 : -1;
+	if (argc != 0) {
+		return net_run_function(c, argc, argv, "net ads group", func);
 	}
-	return net_run_function(c, argc, argv, "net ads group", func);
+
+	if (c->display_usage) {
+		d_printf(  "%s\n"
+			   "net ads group\n"
+			   "    %s\n",
+			 _("Usage:"),
+			 _("List AD groups"));
+		net_display_usage_from_functable(func);
+		return 0;
+	}
+
+	if (!ADS_ERR_OK(ads_startup(c, false, &ads))) {
+		return -1;
+	}
+
+	if (c->opt_long_list_entries)
+		d_printf(_("\nGroup name            Comment"
+			   "\n-----------------------------\n"));
+
+	rc = prepare_ug_search(talloc_tos(), c, &search_ctx, disp_fields);
+	if (!ADS_ERR_OK(rc)) {
+		goto out;
+	}
+
+	rc = ads_generic_search(
+	    ads, ads->config.bind_path, LDAP_SCOPE_SUBTREE,
+	    "(objectCategory=group)",
+	    c->opt_long_list_entries ? longattrs : shortattrs, &search_ctx);
+	if (!ADS_ERR_OK(rc)) {
+		d_fprintf(stderr, _("%s\n"), ads_errstr(rc));
+		goto out;
+	}
+
+	rc = finalize_ug_search(talloc_tos(), c, &search_ctx);
+
+out:
+	ads_destroy_search_context(&search_ctx);
+	ads_destroy(&ads);
+	return ADS_ERR_OK(rc) ? 0 : -1;
 }
 
 static int net_ads_status(struct net_context *c, int argc, const char **argv)

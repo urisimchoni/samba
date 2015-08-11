@@ -850,6 +850,10 @@ static struct functable net_func[] = {
 		{"precheck", 0, POPT_ARG_STRING, &c->opt_precheck},
 		/* Options for 'net ads join' */
 		{"no-dns-updates", 0, POPT_ARG_NONE, &c->opt_no_dns_updates},
+		/* Options for 'net ads {search,user,group}' */
+		{"vlv", 0, POPT_ARG_STRING, &c->opt_vlv_params, 0,
+		 N_("Use Virtual List View for LDAP search"),
+		 N_("start:count:size:context")},
 		POPT_COMMON_SAMBA
 		{ 0, 0, 0, 0}
 	};
