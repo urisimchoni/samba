@@ -181,6 +181,10 @@ ADS_STATUS ads_generic_search(ADS_STRUCT *ads, const char *bind_path, int scope,
 			      const char *expr, const char **attrs,
 			      struct ads_search_ctx *search_ctx);
 void ads_destroy_search_context(struct ads_search_ctx *search_ctx);
+ADS_STATUS ads_create_accum_process_context(TALLOC_CTX *mem_ctx,
+					    struct ads_search_ctx *ctx);
+void ads_recv_accum_process_context(struct ads_search_ctx *ctx,
+				    LDAPMessage **res);
 ADS_STATUS ads_create_callback_process_context(TALLOC_CTX *mem_ctx,
 					       ads_ldap_msg_process_fn fn,
 					       void *data,

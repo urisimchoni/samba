@@ -33,12 +33,22 @@ struct ads_callback_process_ctx {
 	void *data;
 };
 
+struct ads_accum_process_ctx {
+	LDAPMessage *msg;
+};
+
 static ADS_STATUS ads_callback_process_msg(struct ads_search_ctx *_ctx,
 					   ADS_STRUCT *ads, LDAPMessage *msg,
 					   bool *cont);
+static ADS_STATUS ads_accum_process_msg(struct ads_search_ctx *_ctx,
+					ADS_STRUCT *ads, LDAPMessage *msg,
+					bool *cont);
 
 static struct ads_search_process_ops callback_ops = {
     .name = "callback", .process_msg = ads_callback_process_msg};
+
+static struct ads_search_process_ops accum_ops = {
+    .name = "accum", .process_msg = ads_accum_process_msg};
 
 ADS_STATUS ads_create_callback_process_context(TALLOC_CTX *mem_ctx,
 					       ads_ldap_msg_process_fn fn,
@@ -71,6 +81,73 @@ static ADS_STATUS ads_callback_process_msg(struct ads_search_ctx *_ctx,
 	*cont = true;
 
 	return ADS_SUCCESS;
+}
+
+static int ads_free_accum_process_context(struct ads_accum_process_ctx *ctx)
+{
+	if (ctx->msg) {
+		ldap_msgfree(ctx->msg);
+	}
+
+	return 0;
+}
+
+ADS_STATUS ads_create_accum_process_context(TALLOC_CTX *mem_ctx,
+					    struct ads_search_ctx *_ctx)
+{
+	struct ads_accum_process_ctx *ctx =
+	    talloc_zero(mem_ctx, struct ads_accum_process_ctx);
+	if (ctx == NULL) {
+		return ADS_ERROR(LDAP_NO_MEMORY);
+	}
+
+	talloc_set_destructor(ctx, ads_free_accum_process_context);
+
+	_ctx->process_ops = &accum_ops;
+	_ctx->process_ctx = ctx;
+
+	return ADS_SUCCESS;
+}
+
+static ADS_STATUS ads_accum_process_msg(struct ads_search_ctx *_ctx,
+					ADS_STRUCT *ads, LDAPMessage *new_msg,
+					bool *cont)
+{
+	struct ads_accum_process_ctx *ctx = talloc_get_type_abort(
+	    _ctx->process_ctx, struct ads_accum_process_ctx);
+
+	if (ctx->msg == NULL) {
+		ctx->msg = new_msg;
+	} else {
+#ifdef HAVE_LDAP_ADD_RESULT_ENTRY
+		LDAPMessage *msg, *next;
+		/* this relies on the way that ldap_add_result_entry() works
+		   internally. I hope
+		   that this works on all ldap libs, but I have only tested with
+		   openldap */
+		for (msg = ads_first_message(ads, new_msg); msg; msg = next) {
+			next = ads_next_message(ads, msg);
+			ldap_add_result_entry(&ctx->msg, msg);
+		}
+/* note that we do not free new_msg, as the memory is now
+   part of the main returned list */
+#else
+		DEBUG(0,
+		      ("no ldap_add_result_entry() support in LDAP libs!\n"));
+		return ADS_ERROR_NT(NT_STATUS_UNSUCCESSFUL);
+#endif
+	}
+	return ADS_SUCCESS;
+}
+
+void ads_recv_accum_process_context(struct ads_search_ctx *_ctx,
+				    LDAPMessage **res)
+{
+	struct ads_accum_process_ctx *ctx = talloc_get_type_abort(
+	    _ctx->process_ctx, struct ads_accum_process_ctx);
+
+	*res = ctx->msg;
+	ctx->msg = NULL;
 }
 
 #endif
