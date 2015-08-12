@@ -38,16 +38,31 @@ struct vlv_retrv_ctx {
 	DATA_BLOB context;
 };
 
+struct paged_retrv_ctx {
+	DATA_BLOB cookie;
+};
+
 static ADS_STATUS ads_vlv_build_controls(struct ads_search_ctx *ctx,
 					 ADS_STRUCT *ads,
 					 LDAPControl ***scontrols);
 static ADS_STATUS ads_vlv_cont(struct ads_search_ctx *ctx, ADS_STRUCT *ads,
 			       LDAPControl **rcontrols, bool *cont);
+static ADS_STATUS ads_paged_build_controls(struct ads_search_ctx *ctx,
+					   ADS_STRUCT *ads,
+					   LDAPControl ***scontrols);
+static ADS_STATUS ads_paged_cont(struct ads_search_ctx *ctx, ADS_STRUCT *ads,
+				 LDAPControl **rcontrols, bool *cont);
 
 static struct ads_search_retrv_ops vlv_retrv_ops = {
     .name = "VLV",
     .build_controls = ads_vlv_build_controls,
     .cont = ads_vlv_cont,
+};
+
+static struct ads_search_retrv_ops paged_retrv_ops = {
+    .name = "Paged",
+    .build_controls = ads_paged_build_controls,
+    .cont = ads_paged_cont,
 };
 
 static LDAPControl no_referrals = {
@@ -285,4 +300,111 @@ void ads_recv_vlv_retrieval_context(struct ads_search_ctx *_ctx,
 		*error_code = ctx->search_err;
 	}
 }
+
+ADS_STATUS
+ads_create_paged_retrieval_context(TALLOC_CTX *mem_ctx,
+				   struct ads_search_ctx *_ctx)
+{
+	struct paged_retrv_ctx *ctx;
+
+	ctx = talloc_zero(mem_ctx, struct paged_retrv_ctx);
+	if (!ctx) {
+		return ADS_ERROR(LDAP_NO_MEMORY);
+	}
+
+	_ctx->retrv_ops = &paged_retrv_ops;
+	_ctx->retrieval_ctx = ctx;
+
+	return ADS_SUCCESS;
+}
+
+static ADS_STATUS ads_paged_build_controls(struct ads_search_ctx *_ctx,
+					   ADS_STRUCT *ads,
+					   LDAPControl ***scontrols)
+{
+	struct paged_retrv_ctx *ctx =
+	    talloc_get_type_abort(_ctx->retrieval_ctx, struct paged_retrv_ctx);
+	int rc;
+	struct berval paged_cookie;
+	LDAPControl **controls = NULL;
+
+	controls = talloc_zero_array(ctx, LDAPControl *, 3);
+
+	if (controls == NULL) {
+		return ADS_ERROR(LDAP_NO_MEMORY);
+	}
+
+	talloc_set_destructor(controls, ads_free_controls);
+
+	controls[0] = &no_referrals;
+
+	/* The Paged control */
+	paged_cookie.bv_val = (char *)ctx->cookie.data;
+	paged_cookie.bv_len = ctx->cookie.length;
+
+	rc = ldap_create_page_control(ads->ldap.ld, ads->config.ldap_page_size,
+				      &paged_cookie, 1, &controls[1]);
+	if (rc != LDAP_SUCCESS) {
+		DEBUG(0, ("creation of paged control (%u, [%p, %zu]) "
+			  "failed - %s\n",
+			  ads->config.ldap_page_size, ctx->cookie.data,
+			  ctx->cookie.length, ldap_err2string(rc)));
+		goto done;
+	}
+
+	*scontrols = controls;
+	controls = NULL;
+
+done:
+	TALLOC_FREE(controls);
+
+	return ADS_ERROR(rc);
+}
+
+static ADS_STATUS ads_paged_cont(struct ads_search_ctx *_ctx, ADS_STRUCT *ads,
+				 LDAPControl **rcontrols, bool *cont)
+{
+	struct paged_retrv_ctx *ctx =
+	    talloc_get_type_abort(_ctx->retrieval_ctx, struct paged_retrv_ctx);
+	struct berval *cookie_bv = NULL;
+	ber_int_t count;
+	int rc;
+
+	data_blob_free(&ctx->cookie);
+
+	/* default - MAY retry on error */
+	*cont = true;
+
+	rc = ldap_parse_page_control(ads->ldap.ld, rcontrols, &count,
+				     &cookie_bv);
+	if (rc != LDAP_SUCCESS) {
+		DEBUG(3, ("Failed parsing Paged return control\n"));
+		goto done;
+	}
+
+	if (cookie_bv != NULL && cookie_bv->bv_len != 0) {
+		ctx->cookie =
+		    data_blob_talloc(ctx, cookie_bv->bv_val, cookie_bv->bv_len);
+		if (ctx->cookie.data == NULL) {
+			DEBUG(
+			    0,
+			    ("failed duplicating %zd bytes of search cookie\n",
+			     (size_t)cookie_bv->bv_len));
+			rc = LDAP_NO_MEMORY;
+			*cont = false;
+			goto done;
+		}
+	} else {
+		/* success with empty cookie -
+		   end of search */
+		*cont = false;
+	}
+
+done:
+	if (cookie_bv)
+		ber_bvfree(cookie_bv);
+
+	return ADS_ERROR(rc);
+}
+
 #endif

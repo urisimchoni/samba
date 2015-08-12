@@ -187,6 +187,9 @@ ADS_STATUS ads_create_vlv_retrieval_context(
 void ads_recv_vlv_retrieval_context(struct ads_search_ctx *ctx,
 				    DATA_BLOB *search_context, uint32_t *from,
 				    uint32_t *table_size, uint32_t *error_code);
+ADS_STATUS
+ads_create_paged_retrieval_context(TALLOC_CTX *mem_ctx,
+				   struct ads_search_ctx *ctx);
 
 struct GROUP_POLICY_OBJECT;
 ADS_STATUS ads_parse_gpo(ADS_STRUCT *ads,
