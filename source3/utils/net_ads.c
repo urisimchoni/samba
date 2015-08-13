@@ -2615,10 +2615,13 @@ static int net_ads_search_usage(struct net_context *c, int argc, const char **ar
 static int net_ads_search(struct net_context *c, int argc, const char **argv)
 {
 	ADS_STRUCT *ads;
-	ADS_STATUS rc;
+	ADS_STATUS status;
+	int rc = -1;
 	const char *ldap_exp;
 	const char **attrs;
 	LDAPMessage *res = NULL;
+	struct ads_search_ctx search_ctx = {.retries =
+						ADS_SEARCH_DEFAULT_RETRIES};
 
 	if (argc < 1 || c->display_usage) {
 		return net_ads_search_usage(c, argc, argv);
@@ -2628,27 +2631,46 @@ static int net_ads_search(struct net_context *c, int argc, const char **argv)
 		return -1;
 	}
 
+	if (!ADS_ERR_OK(
+		prepare_search_retrieval(talloc_tos(), c, &search_ctx))) {
+		goto out;
+	}
+
+	status = ads_create_accum_process_context(talloc_tos(), &search_ctx);
+	if (!ADS_ERR_OK(status)) {
+		d_fprintf(stderr, _("internal error: %s\n"),
+			  ads_errstr(status));
+		goto out;
+	}
+
 	ldap_exp = argv[0];
 	attrs = (argv + 1);
 
-	rc = ads_do_search_retry(ads, ads->config.bind_path,
-			       LDAP_SCOPE_SUBTREE,
-			       ldap_exp, attrs, &res);
-	if (!ADS_ERR_OK(rc)) {
-		d_fprintf(stderr, _("search failed: %s\n"), ads_errstr(rc));
-		ads_destroy(&ads);
-		return -1;
+	status =
+	    ads_generic_search(ads, ads->config.bind_path, LDAP_SCOPE_SUBTREE,
+			       ldap_exp, attrs, &search_ctx);
+	if (!ADS_ERR_OK(status)) {
+		d_fprintf(stderr, _("search failed: %s\n"), ads_errstr(status));
+		goto out;
 	}
+
+	ads_recv_accum_process_context(&search_ctx, &res);
 
 	d_printf(_("Got %d replies\n\n"), ads_count_replies(ads, res));
 
 	/* dump the results */
 	ads_dump(ads, res);
 
-	ads_msgfree(ads, res);
+	finalize_search_retrv(talloc_tos(), c, &search_ctx);
+
+	rc = 0;
+out:
+	ads_destroy_search_context(&search_ctx);
+	if (res != NULL)
+		ads_msgfree(ads, res);
 	ads_destroy(&ads);
 
-	return 0;
+	return rc;
 }
 
 
