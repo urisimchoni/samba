@@ -43,12 +43,15 @@ static ADS_STATUS ads_callback_process_msg(struct ads_search_ctx *_ctx,
 static ADS_STATUS ads_accum_process_msg(struct ads_search_ctx *_ctx,
 					ADS_STRUCT *ads, LDAPMessage *msg,
 					bool *cont);
+static void ads_accum_reset(struct ads_search_ctx *ctx);
 
 static struct ads_search_process_ops callback_ops = {
     .name = "callback", .process_msg = ads_callback_process_msg};
 
-static struct ads_search_process_ops accum_ops = {
-    .name = "accum", .process_msg = ads_accum_process_msg};
+static struct ads_search_process_ops accum_ops = {.name = "accum",
+						  .process_msg =
+						      ads_accum_process_msg,
+						  .reset = ads_accum_reset};
 
 ADS_STATUS ads_create_callback_process_context(TALLOC_CTX *mem_ctx,
 					       ads_ldap_msg_process_fn fn,
@@ -87,6 +90,7 @@ static int ads_free_accum_process_context(struct ads_accum_process_ctx *ctx)
 {
 	if (ctx->msg) {
 		ldap_msgfree(ctx->msg);
+		ctx->msg = NULL;
 	}
 
 	return 0;
@@ -138,6 +142,14 @@ static ADS_STATUS ads_accum_process_msg(struct ads_search_ctx *_ctx,
 #endif
 	}
 	return ADS_SUCCESS;
+}
+
+static void ads_accum_reset(struct ads_search_ctx *_ctx)
+{
+	struct ads_accum_process_ctx *ctx = talloc_get_type_abort(
+	    _ctx->process_ctx, struct ads_accum_process_ctx);
+
+	ads_free_accum_process_context(ctx);
 }
 
 void ads_recv_accum_process_context(struct ads_search_ctx *_ctx,

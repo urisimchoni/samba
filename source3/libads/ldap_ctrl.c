@@ -47,22 +47,28 @@ static ADS_STATUS ads_vlv_build_controls(struct ads_search_ctx *ctx,
 					 LDAPControl ***scontrols);
 static ADS_STATUS ads_vlv_cont(struct ads_search_ctx *ctx, ADS_STRUCT *ads,
 			       LDAPControl **rcontrols, bool *cont);
+static void ads_vlv_prepare_retry(struct ads_search_ctx *ctx, ADS_STRUCT *ads,
+				  ADS_STATUS last_error);
 static ADS_STATUS ads_paged_build_controls(struct ads_search_ctx *ctx,
 					   ADS_STRUCT *ads,
 					   LDAPControl ***scontrols);
 static ADS_STATUS ads_paged_cont(struct ads_search_ctx *ctx, ADS_STRUCT *ads,
 				 LDAPControl **rcontrols, bool *cont);
+static void ads_paged_prepare_retry(struct ads_search_ctx *ctx, ADS_STRUCT *ads,
+				    ADS_STATUS last_error);
 
 static struct ads_search_retrv_ops vlv_retrv_ops = {
     .name = "VLV",
     .build_controls = ads_vlv_build_controls,
     .cont = ads_vlv_cont,
+    .prepare_retry = ads_vlv_prepare_retry,
 };
 
 static struct ads_search_retrv_ops paged_retrv_ops = {
     .name = "Paged",
     .build_controls = ads_paged_build_controls,
     .cont = ads_paged_cont,
+    .prepare_retry = ads_paged_prepare_retry,
 };
 
 static LDAPControl no_referrals = {
@@ -277,6 +283,16 @@ done:
 	return ADS_ERROR(rc);
 }
 
+static void ads_vlv_prepare_retry(struct ads_search_ctx *_ctx, ADS_STRUCT *ads,
+				  ADS_STATUS last_error)
+{
+	struct vlv_retrv_ctx *ctx =
+	    talloc_get_type_abort(_ctx->retrieval_ctx, struct vlv_retrv_ctx);
+
+	/* next time try without the context */
+	data_blob_free(&ctx->context);
+}
+
 void ads_recv_vlv_retrieval_context(struct ads_search_ctx *_ctx,
 				    DATA_BLOB *search_context, uint32_t *from,
 				    uint32_t *table_size, uint32_t *error_code)
@@ -405,6 +421,24 @@ done:
 		ber_bvfree(cookie_bv);
 
 	return ADS_ERROR(rc);
+}
+
+static void ads_paged_prepare_retry(struct ads_search_ctx *_ctx,
+				    ADS_STRUCT *ads, ADS_STATUS last_error)
+{
+	struct paged_retrv_ctx *ctx =
+	    talloc_get_type_abort(_ctx->retrieval_ctx, struct paged_retrv_ctx);
+
+	data_blob_free(&ctx->cookie);
+
+	if (NT_STATUS_EQUAL(ads_ntstatus(last_error), NT_STATUS_IO_TIMEOUT) &&
+	    ads->config.ldap_page_size >= 250) {
+		int new_page_size = (ads->config.ldap_page_size / 2);
+		DEBUG(1, ("Reducing LDAP page size from %d to %d due to "
+			  "IO_TIMEOUT\n",
+			  ads->config.ldap_page_size, new_page_size));
+		ads->config.ldap_page_size = new_page_size;
+	}
 }
 
 #endif

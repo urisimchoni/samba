@@ -75,6 +75,7 @@ struct ads_search_process_ops {
 	const char *name;
 	ADS_STATUS (*process_msg)(struct ads_search_ctx *ctx, ADS_STRUCT *ads,
 				  LDAPMessage *msg, bool *cont);
+	void (*reset)(struct ads_search_ctx *ctx);
 };
 
 struct ads_search_retrv_ops {
@@ -83,6 +84,8 @@ struct ads_search_retrv_ops {
 				     ADS_STRUCT *ads, LDAPControl ***scontrols);
 	ADS_STATUS (*cont)(struct ads_search_ctx *ctx, ADS_STRUCT *ads,
 			   LDAPControl **rcontrols, bool *cont);
+	void (*prepare_retry)(struct ads_search_ctx *ctx, ADS_STRUCT *ads,
+			      ADS_STATUS last_error);
 };
 
 struct ads_search_ctx {
@@ -90,7 +93,10 @@ struct ads_search_ctx {
 	struct ads_search_process_ops *process_ops;
 	void *retrieval_ctx;
 	void *process_ctx;
+	unsigned retries; /* after first attempt (0 -> no retry) */
 };
+
+#define ADS_SEARCH_DEFAULT_RETRIES 2
 
 /*
  * Prototypes for ads

@@ -978,6 +978,22 @@ static ADS_STATUS ads_gsearch_cont(struct ads_search_ctx *ctx, ADS_STRUCT *ads,
 }
 
 /**
+ * Prepare to retry search
+ *
+ * @param ctx - search context
+ * @param ads - connection to server
+ * @param last_error - error code of failed query
+ * @return status code
+ **/
+static void ads_gsearch_prepare_retry(struct ads_search_ctx *ctx,
+				      ADS_STRUCT *ads, ADS_STATUS last_error)
+{
+	if (ctx->retrv_ops->prepare_retry) {
+		ctx->retrv_ops->prepare_retry(ctx, ads, last_error);
+	}
+}
+
+/**
  * Process last query results
  *
  * @param ctx - search context
@@ -993,6 +1009,18 @@ static ADS_STATUS ads_gsearch_process_msg(struct ads_search_ctx *ctx,
 					  bool *cont)
 {
 	return ctx->process_ops->process_msg(ctx, ads, msg, cont);
+}
+
+/**
+ * Reset message processing state
+ *
+ * @param ctx - search context
+ **/
+static void ads_gsearch_reset(struct ads_search_ctx *ctx)
+{
+	if (ctx->process_ops->reset) {
+		ctx->process_ops->reset(ctx);
+	}
 }
 
 /**
@@ -1020,14 +1048,22 @@ ADS_STATUS ads_generic_search(ADS_STRUCT *ads, const char *bind_path, int scope,
 	LDAPMessage *msg = NULL;
 	ADS_STATUS status;
 	bool retrv_cont, process_cont;
+	unsigned retries = search_ctx->retries;
+	char *bp;
 
 	DEBUG(10, ("%s: bind path = '%s' scope = %d filter = '%s' retrieval = "
 		   "%s processing = %s\n",
 		   __func__, bind_path, scope, expr,
 		   search_ctx->retrv_ops->name, search_ctx->process_ops->name));
 
+	/* we take a copy of bind path because this may be
+	   inside the ADS struct which may reconnect */
+	bp = SMB_STRDUP(bind_path);
+	if (!bp) {
+		return ADS_ERROR(LDAP_NO_MEMORY);
+	}
+
 	do {
-		/* Fixme: support retry */
 		status =
 		    ads_gsearch_build_controls(search_ctx, ads, &scontrols);
 		if (!ADS_ERR_OK(status)) {
@@ -1036,24 +1072,56 @@ ADS_STATUS ads_generic_search(ADS_STRUCT *ads, const char *bind_path, int scope,
 			goto done;
 		}
 
-		status =
-		    ads_do_search_internal(ads, bind_path, scope, expr, attrs,
-					   scontrols, &msg, &rcontrols);
-		if (!ADS_ERR_OK(status)) {
-			DEBUG(3, ("query failed - %s\n", ads_errstr(status)));
-			goto done;
-		}
+		retrv_cont = true;
+		status = ads_do_search_internal(ads, bp, scope, expr, attrs,
+						scontrols, &msg, &rcontrols);
 		TALLOC_FREE(scontrols);
 
-		status = ads_gsearch_cont(search_ctx, ads, rcontrols,
-					  &retrv_cont);
-		if (!ADS_ERR_OK(status)) {
-			DEBUG(3, ("cont failed - %s\n",
-				  ads_errstr(status)));
+		if (ADS_ERR_OK(status)) {
+			status = ads_gsearch_cont(search_ctx, ads, rcontrols,
+						  &retrv_cont);
+			if (!ADS_ERR_OK(status)) {
+				DEBUG(3, ("cont failed - %s\n",
+					  ads_errstr(status)));
+			}
 		}
 
 		ldap_controls_free(rcontrols);
 		rcontrols = NULL;
+
+		if (!ADS_ERR_OK(status)) {
+			/* failure in query, in parsing message, or in
+			   parsing and processing return controls */
+			DEBUG(3, ("query failed (%s). %d more attempts to go\n",
+				  ads_errstr(status), retries));
+			if (retries == 0) {
+				goto done;
+			}
+
+			/* more retries to do - set this up */
+			--retries;
+			if (msg) {
+				ldap_msgfree(msg);
+				msg = NULL;
+			}
+			ads_gsearch_prepare_retry(search_ctx, ads, status);
+			ads_gsearch_reset(search_ctx);
+
+			DEBUG(3, ("Reopening ads connection to realm '%s' "
+				  "after error %s\n",
+				  ads->config.realm, ads_errstr(status)));
+
+			ads_disconnect(ads);
+			status = ads_connect(ads);
+
+			if (!ADS_ERR_OK(status)) {
+				DEBUG(1, ("%s: failed to reconnect (%s)\n",
+					  __func__, ads_errstr(status)));
+				goto done;
+			}
+
+			continue;
+		}
 
 		process_cont = true;
 		status = ads_gsearch_process_msg(search_ctx, ads, msg,
@@ -1067,6 +1135,7 @@ ADS_STATUS ads_generic_search(ADS_STRUCT *ads, const char *bind_path, int scope,
 	} while (retrv_cont && process_cont);
 
 done:
+	SAFE_FREE(bp);
 	TALLOC_FREE(scontrols);
 	if (rcontrols) {
 		ldap_controls_free(rcontrols);
