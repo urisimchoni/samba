@@ -502,3 +502,11 @@ bld.SAMBA3_MODULE('vfs_fake_dfq',
                  init_function='',
                  internal_module=bld.SAMBA3_IS_STATIC_MODULE('vfs_fake_dfq'),
                  enabled=bld.SAMBA3_IS_ENABLED_MODULE('vfs_fake_dfq'))
+
+bld.SAMBA3_MODULE('vfs_admin',
+                 subsystem='vfs',
+                 source='vfs_admin.c',
+                 deps='samba-util',
+                 init_function='',
+                 internal_module=bld.SAMBA3_IS_STATIC_MODULE('vfs_admin'),
+                 enabled=bld.SAMBA3_IS_ENABLED_MODULE('vfs_admin'))
