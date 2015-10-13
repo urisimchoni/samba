@@ -510,3 +510,11 @@ bld.SAMBA3_MODULE('vfs_admin',
                  init_function='',
                  internal_module=bld.SAMBA3_IS_STATIC_MODULE('vfs_admin'),
                  enabled=bld.SAMBA3_IS_ENABLED_MODULE('vfs_admin'))
+
+bld.SAMBA3_MODULE('vfs_protect',
+                 subsystem='vfs',
+                 source='vfs_protect.c',
+                 deps='samba-util',
+                 init_function='',
+                 internal_module=bld.SAMBA3_IS_STATIC_MODULE('vfs_protect'),
+                 enabled=bld.SAMBA3_IS_ENABLED_MODULE('vfs_protect'))
