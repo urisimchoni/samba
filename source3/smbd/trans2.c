@@ -438,7 +438,7 @@ static NTSTATUS get_ea_list_from_file_path(TALLOC_CTX *mem_ctx,
 		fstring dos_ea_name;
 
 		if (strnequal(names[i], "system.", 7)
-		    || samba_private_attr_name(names[i]))
+		    || ((conn->session_info->unix_token->uid != sec_initial_uid()) && samba_private_attr_name(names[i])))
 			continue;
 
 		/*
@@ -784,7 +784,7 @@ NTSTATUS set_ea(connection_struct *conn, files_struct *fsp,
 
 		DEBUG(10,("set_ea: ea_name %s ealen = %u\n", unix_ea_name, (unsigned int)ea_list->ea.value.length));
 
-		if (samba_private_attr_name(unix_ea_name)) {
+		if ((conn->session_info->unix_token->uid != sec_initial_uid()) && samba_private_attr_name(unix_ea_name)) {
 			DEBUG(10,("set_ea: ea name %s is a private Samba name.\n", unix_ea_name));
 			return NT_STATUS_ACCESS_DENIED;
 		}
