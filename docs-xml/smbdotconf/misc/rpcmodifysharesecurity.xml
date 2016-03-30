@@ -1,0 +1,20 @@
+<samba:parameter name="rpc modify share security"
+                 context="G"
+				 type="boolean"
+                 xmlns:samba="http://www.samba.org/samba/DTD/samba-doc">
+<description>
+    <para>This parameter controls whether it is allowed to modify
+    share security via RPC (e.g. using the Windows "Computer Management"
+    application).
+    </para>
+
+    <para>Banning RPC modifications can be used by a server that is
+    managed by a provisioning system which incapable to sync such changes
+    into its own database.
+    </para>
+
+</description>
+
+<value type="default">yes</value>
+<value type="example">no</value>
+</samba:parameter>

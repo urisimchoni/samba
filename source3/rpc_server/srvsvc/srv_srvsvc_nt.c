@@ -1934,6 +1934,12 @@ WERROR _srvsvc_NetShareSetInfo(struct pipes_struct *p,
 		struct security_descriptor *old_sd;
 		size_t sd_size;
 
+		if (!lp_rpc_modify_share_security()) {
+			DEBUG(10, ("_srvsvc_NetShareSetInfo: modifying "
+				   "security via RPC not allowed\n"));
+			return WERR_ACCESS_DENIED;
+		}
+
 		old_sd = get_share_security(p->mem_ctx, lp_servicename(talloc_tos(), snum), &sd_size);
 
 		if (old_sd && !security_descriptor_equal(old_sd, psd)) {
