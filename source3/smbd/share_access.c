@@ -67,6 +67,17 @@ static bool do_group_checks(const char **name, const char **pattern)
 	return False;
 }
 
+static bool is_principal_group(const char *name)
+{
+	if (name[0] == '@' || (name[0] == '+' && name[1] == '&') ||
+	    name[0] == '+' || (name[0] == '&' && name[1] == '+') ||
+	    name[0] == '&') {
+		return true;
+	}
+
+	return false;
+}
+
 static bool token_contains_name(TALLOC_CTX *mem_ctx,
 				const char *username,
 				const char *domain,
@@ -153,29 +164,49 @@ static bool token_contains_name(TALLOC_CTX *mem_ctx,
  *
  * The other use is the netgroup check when using @group or &group.
  */
+#define PRINCIPAL_TYPE_USER 1
+#define PRINCIPAL_TYPE_GROUP 2
+#define PRINCIPAL_TYPE_ALL (PRINCIPAL_TYPE_USER | PRINCIPAL_TYPE_GROUP)
 
-bool token_contains_name_in_list(const char *username,
-				 const char *domain,
-				 const char *sharename,
-				 const struct security_token *token,
-				 const char **list)
+static bool token_contains_name_in_list_internal(
+    const char *username, const char *domain, const char *sharename,
+    const struct security_token *token, const char **list,
+    unsigned principals_mask)
 {
 	if (list == NULL) {
 		return False;
 	}
-	while (*list != NULL) {
-		TALLOC_CTX *frame = talloc_stackframe();
+	for (;*list != NULL; ++list) {
+		TALLOC_CTX *frame;
 		bool ret;
+		bool is_group = is_principal_group(*list);
 
+		if (is_group && !(principals_mask & PRINCIPAL_TYPE_GROUP)) {
+			continue;
+		}
+
+		if (!is_group && !(principals_mask & PRINCIPAL_TYPE_USER)) {
+			continue;
+		}
+
+		frame = talloc_stackframe();
 		ret = token_contains_name(frame, username, domain, sharename,
 					  token, *list);
 		TALLOC_FREE(frame);
 		if (ret) {
 			return true;
 		}
-		list += 1;
 	}
 	return False;
+}
+
+bool token_contains_name_in_list(const char *username, const char *domain,
+				 const char *sharename,
+				 const struct security_token *token,
+				 const char **list)
+{
+	return token_contains_name_in_list_internal(
+	    username, domain, sharename, token, list, PRINCIPAL_TYPE_ALL);
 }
 
 /*
@@ -195,23 +226,38 @@ bool user_ok_token(const char *username, const char *domain,
 		   const struct security_token *token, int snum)
 {
 	if (lp_invalid_users(snum) != NULL) {
-		if (token_contains_name_in_list(username, domain,
-						lp_servicename(talloc_tos(), snum),
-						token,
-						lp_invalid_users(snum))) {
+		if (token_contains_name_in_list_internal(
+			username, domain, lp_servicename(talloc_tos(), snum),
+			token, lp_invalid_users(snum), PRINCIPAL_TYPE_USER)) {
 			DEBUG(10, ("User %s in 'invalid users'\n", username));
-			return False;
+			return false;
 		}
 	}
 
 	if (lp_valid_users(snum) != NULL) {
-		if (!token_contains_name_in_list(username, domain,
-						 lp_servicename(talloc_tos(), snum),
-						 token,
-						 lp_valid_users(snum))) {
-			DEBUG(10, ("User %s not in 'valid users'\n",
-				   username));
-			return False;
+		if (token_contains_name_in_list_internal(
+			username, domain, lp_servicename(talloc_tos(), snum),
+			token, lp_valid_users(snum), PRINCIPAL_TYPE_USER)) {
+			DEBUG(10, ("User %s in 'valid users'\n", username));
+			return true;
+		}
+	}
+
+	if (lp_invalid_users(snum) != NULL) {
+		if (token_contains_name_in_list_internal(
+			username, domain, lp_servicename(talloc_tos(), snum),
+			token, lp_invalid_users(snum), PRINCIPAL_TYPE_GROUP)) {
+			DEBUG(10, ("User %s in 'invalid users'\n", username));
+			return false;
+		}
+	}
+
+	if (lp_valid_users(snum) != NULL) {
+		if (!token_contains_name_in_list_internal(
+			username, domain, lp_servicename(talloc_tos(), snum),
+			token, lp_valid_users(snum), PRINCIPAL_TYPE_GROUP)) {
+			DEBUG(10, ("User %s not in 'valid users'\n", username));
+			return false;
 		}
 	}
 
@@ -243,24 +289,42 @@ bool is_share_read_only_for_token(const char *username,
 	int snum = SNUM(conn);
 	bool result = conn->read_only;
 
+	if (lp_write_list(snum) != NULL) {
+		if (token_contains_name_in_list_internal(
+			username, domain, lp_servicename(talloc_tos(), snum),
+			token, lp_write_list(snum), PRINCIPAL_TYPE_USER)) {
+			result = false;
+			goto done;
+		}
+	}
+
 	if (lp_read_list(snum) != NULL) {
-		if (token_contains_name_in_list(username, domain,
-						lp_servicename(talloc_tos(), snum),
-						token,
-						lp_read_list(snum))) {
-			result = True;
+		if (token_contains_name_in_list_internal(
+			username, domain, lp_servicename(talloc_tos(), snum),
+			token, lp_read_list(snum), PRINCIPAL_TYPE_USER)) {
+			result = true;
+			goto done;
 		}
 	}
 
 	if (lp_write_list(snum) != NULL) {
-		if (token_contains_name_in_list(username, domain,
-						lp_servicename(talloc_tos(), snum),
-						token,
-						lp_write_list(snum))) {
-			result = False;
+		if (token_contains_name_in_list_internal(
+			username, domain, lp_servicename(talloc_tos(), snum),
+			token, lp_write_list(snum), PRINCIPAL_TYPE_GROUP)) {
+			result = false;
+			goto done;
 		}
 	}
 
+	if (lp_read_list(snum) != NULL) {
+		if (token_contains_name_in_list_internal(
+			username, domain, lp_servicename(talloc_tos(), snum),
+			token, lp_read_list(snum), PRINCIPAL_TYPE_GROUP)) {
+			result = true;
+		}
+	}
+
+done:
 	DEBUG(10,("is_share_read_only_for_user: share %s is %s for unix user "
 		  "%s\n", lp_servicename(talloc_tos(), snum),
 		  result ? "read-only" : "read-write", username));
