@@ -104,6 +104,8 @@ extern void start_fssd(struct tevent_context *ev_ctx,
 extern void start_mdssd(struct tevent_context *ev_ctx,
 			struct messaging_context *msg_ctx);
 
+void naspipe_output(const char *fmt, ...);
+
 /*******************************************************************
  What to do when smb.conf is updated.
  ********************************************************************/
@@ -973,6 +975,7 @@ static void smbd_accept_connection(struct tevent_context *ev,
 
 	if (!allowable_number_of_smbd_processes(s->parent)) {
 		close(fd);
+		naspipe_output("samba connlimit\n");
 		return;
 	}
 
