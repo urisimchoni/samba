@@ -299,6 +299,7 @@ bld.SAMBA3_SUBSYSTEM('KRBCLIENT',
 bld.SAMBA3_SUBSYSTEM('samba3util',
                    source='''
                           lib/system.c
+                          lib/naspipe.c
                           lib/sendfile.c
                           lib/recvfile.c
                           lib/time.c
