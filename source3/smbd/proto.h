@@ -553,6 +553,7 @@ void notify_fname(connection_struct *conn, uint32_t action, uint32_t filter,
 char *notify_filter_string(TALLOC_CTX *mem_ctx, uint32_t filter);
 struct sys_notify_context *sys_notify_context_create(TALLOC_CTX *mem_ctx,
 						     struct tevent_context *ev);
+char *notify_get_path(struct notify_change_buf *notify);
 
 /* The following definitions come from smbd/notify_inotify.c  */
 

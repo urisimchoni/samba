@@ -55,6 +55,9 @@ struct notify_change_buf {
 	 * list, because we have to append at the end and delete from the top.
 	 */
 	struct notify_change_request *requests;
+
+	/* Real path for notify registration */
+	char *path;
 };
 
 struct notify_change_request {
@@ -298,17 +301,23 @@ NTSTATUS change_notify_create(struct files_struct *fsp, uint32_t filter,
 
 	fsp_fullbasepath(fsp, fullpath, sizeof(fullpath));
 
+	fsp->notify->path = talloc_strdup(fsp->notify, fullpath);
+	if (fsp->notify->path == NULL) {
+		return NT_STATUS_NO_MEMORY;
+	}
+
 	/*
 	 * Avoid /. at the end of the path name. notify can't deal with it.
 	 */
-	if (len > 1 && fullpath[len-1] == '.' && fullpath[len-2] == '/') {
-		fullpath[len-2] = '\0';
+	if (len > 1 && fsp->notify->path[len-1] == '.' &&
+            fsp->notify->path[len-2] == '/') {
+		fsp->notify->path[len-2] = '\0';
 	}
 
 	if ((fsp->notify->filter != 0) ||
 	    (fsp->notify->subdir_filter != 0)) {
 		status = notify_add(fsp->conn->sconn->notify_ctx,
-				    fullpath, fsp->notify->filter,
+				    fsp->notify->path, fsp->notify->filter,
 				    fsp->notify->subdir_filter, fsp);
 	}
 
@@ -499,19 +508,10 @@ static struct files_struct *smbd_notifyd_reregister(struct files_struct *fsp,
 	    (fsp->notify != NULL) &&
 	    ((fsp->notify->filter != 0) ||
 	     (fsp->notify->subdir_filter != 0))) {
-		size_t len = fsp_fullbasepath(fsp, NULL, 0);
-		char fullpath[len+1];
-
 		NTSTATUS status;
 
-		fsp_fullbasepath(fsp, fullpath, sizeof(fullpath));
-		if (len > 1 && fullpath[len-1] == '.' &&
-		    fullpath[len-2] == '/') {
-			fullpath[len-2] = '\0';
-		}
-
 		status = notify_add(fsp->conn->sconn->notify_ctx,
-				    fullpath, fsp->notify->filter,
+				    fsp->notify->path, fsp->notify->filter,
 				    fsp->notify->subdir_filter, fsp);
 		if (!NT_STATUS_IS_OK(status)) {
 			DBG_DEBUG("notify_add failed: %s\n",
@@ -724,4 +724,9 @@ struct sys_notify_context *sys_notify_context_create(TALLOC_CTX *mem_ctx,
 	ctx->ev = ev;
 	ctx->private_data = NULL;
 	return ctx;
+}
+
+char *notify_get_path(struct notify_change_buf *notify)
+{
+	return notify->path;
 }

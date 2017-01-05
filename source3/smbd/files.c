@@ -518,19 +518,7 @@ void file_free(struct smb_request *req, files_struct *fsp)
 	uint64_t fnum = fsp->fnum;
 
 	if (fsp->notify) {
-		size_t len = fsp_fullbasepath(fsp, NULL, 0);
-		char fullpath[len+1];
-
-		fsp_fullbasepath(fsp, fullpath, sizeof(fullpath));
-
-		/*
-		 * Avoid /. at the end of the path name. notify can't
-		 * deal with it.
-		 */
-		if (len > 1 && fullpath[len-1] == '.' &&
-		    fullpath[len-2] == '/') {
-			fullpath[len-2] = '\0';
-		}
+		char *fullpath = notify_get_path(fsp->notify);
 
 		notify_remove(fsp->conn->sconn->notify_ctx, fsp, fullpath);
 		TALLOC_FREE(fsp->notify);
