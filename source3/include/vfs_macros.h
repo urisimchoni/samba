@@ -590,4 +590,11 @@
 #define SMB_VFS_NEXT_READDIR_ATTR(conn, fname, mem_ctx, attr_data) \
 	smb_vfs_call_readdir_attr((handle)->next, (fname), (mem_ctx), (attr_data))
 
+#define SMB_VFS_GET_NOTIFY_PATH(conn, path, mem_ctx, notify_path)              \
+	smb_vfs_call_get_notify_path((conn)->vfs_handles, (path), (mem_ctx),   \
+				     (notify_path))
+#define SMB_VFS_NEXT_GET_NOTIFY_PATH(handle, path, mem_ctx, notify_path)       \
+	smb_vfs_call_get_notify_path((handle)->next, (path), (mem_ctx),        \
+				     (notify_path))
+
 #endif /* _VFS_MACROS_H */

@@ -2609,3 +2609,12 @@ NTSTATUS smb_vfs_call_readdir_attr(struct vfs_handle_struct *handle,
 	VFS_FIND(readdir_attr);
 	return handle->fns->readdir_attr_fn(handle, fname, mem_ctx, attr_data);
 }
+
+NTSTATUS smb_vfs_call_get_notify_path(struct vfs_handle_struct *handle,
+				      const char *path, TALLOC_CTX *mem_ctx,
+				      char **notify_path)
+{
+	VFS_FIND(get_notify_path);
+	return handle->fns->get_notify_path_fn(handle, path, mem_ctx,
+					       notify_path);
+}

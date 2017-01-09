@@ -212,6 +212,7 @@ void notify_trigger(struct notify_context *ctx,
 	struct notify_trigger_msg msg;
 	struct iovec iov[4];
 	char slash = '/';
+    int iovlen;
 
 	DEBUG(10, ("notify_trigger called action=0x%x, filter=0x%x, "
 		   "dir=%s, name=%s\n", (unsigned)action, (unsigned)filter,
@@ -227,16 +228,24 @@ void notify_trigger(struct notify_context *ctx,
 
 	iov[0].iov_base = &msg;
 	iov[0].iov_len = offsetof(struct notify_trigger_msg, path);
-	iov[1].iov_base = discard_const_p(char, dir);
-	iov[1].iov_len = strlen(dir);
-	iov[2].iov_base = &slash;
-	iov[2].iov_len = 1;
-	iov[3].iov_base = discard_const_p(char, name);
-	iov[3].iov_len = strlen(name)+1;
+
+    if (dir) {
+        iov[1].iov_base = discard_const_p(char, dir);
+        iov[1].iov_len = strlen(dir);
+        iov[2].iov_base = &slash;
+        iov[2].iov_len = 1;
+        iov[3].iov_base = discard_const_p(char, name);
+        iov[3].iov_len = strlen(name)+1;
+        iovlen = 4;
+    } else {
+        iov[1].iov_base = discard_const_p(char, name);
+        iov[1].iov_len = strlen(name) + 1;
+        iovlen = 2;
+    }
 
 	messaging_send_iov(
 		ctx->msg_ctx, ctx->notifyd, MSG_SMB_NOTIFY_TRIGGER,
-		iov, ARRAY_SIZE(iov), NULL, 0);
+		iov, iovlen, NULL, 0);
 }
 
 NTSTATUS notify_walk(struct notify_context *notify,

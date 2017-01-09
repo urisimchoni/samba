@@ -909,6 +909,10 @@ struct vfs_fn_pointers {
 				    const struct smb_filename *fname,
 				    TALLOC_CTX *mem_ctx,
 				    struct readdir_attr_data **attr_data);
+	NTSTATUS (*get_notify_path_fn)(struct vfs_handle_struct *handle,
+				    const char *path,
+				    TALLOC_CTX *mem_ctx,
+				    char **notify_path);
 };
 
 /*
@@ -1387,6 +1391,9 @@ NTSTATUS smb_vfs_call_readdir_attr(struct vfs_handle_struct *handle,
 				   const struct smb_filename *fname,
 				   TALLOC_CTX *mem_ctx,
 				   struct readdir_attr_data **attr_data);
+NTSTATUS smb_vfs_call_get_notify_path(struct vfs_handle_struct *handle,
+				   const char *path, TALLOC_CTX *mem_ctx,
+				   char **notify_path);
 
 NTSTATUS smb_register_vfs(int version, const char *name,
 			  const struct vfs_fn_pointers *fns);

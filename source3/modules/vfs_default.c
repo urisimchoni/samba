@@ -2849,6 +2849,13 @@ static NTSTATUS vfswrap_durable_reconnect(struct vfs_handle_struct *handle,
 					     fsp, new_cookie);
 }
 
+static NTSTATUS vfswrap_get_notify_path(struct vfs_handle_struct *handle,
+				 const char *path, TALLOC_CTX *mem_ctx,
+				 char **notify_path)
+{
+	return NT_STATUS_NOT_SUPPORTED;
+}
+
 static struct vfs_fn_pointers vfs_default_fns = {
 	/* Disk operations */
 
@@ -2981,6 +2988,8 @@ static struct vfs_fn_pointers vfs_default_fns = {
 	.durable_cookie_fn = vfswrap_durable_cookie,
 	.durable_disconnect_fn = vfswrap_durable_disconnect,
 	.durable_reconnect_fn = vfswrap_durable_reconnect,
+
+	.get_notify_path_fn = vfswrap_get_notify_path,
 };
 
 NTSTATUS vfs_default_init(TALLOC_CTX *);

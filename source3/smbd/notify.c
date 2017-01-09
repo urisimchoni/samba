@@ -299,11 +299,28 @@ NTSTATUS change_notify_create(struct files_struct *fsp, uint32_t filter,
 	fsp->notify->filter = filter;
 	fsp->notify->subdir_filter = recursive ? filter : 0;
 
-	fsp_fullbasepath(fsp, fullpath, sizeof(fullpath));
+	status = SMB_VFS_GET_NOTIFY_PATH(fsp->conn, fsp->fsp_name->base_name,
+					 fsp->notify, &fsp->notify->path);
 
-	fsp->notify->path = talloc_strdup(fsp->notify, fullpath);
-	if (fsp->notify->path == NULL) {
-		return NT_STATUS_NO_MEMORY;
+	if (!NT_STATUS_IS_OK(status)) {
+		if (!NT_STATUS_EQUAL(status, NT_STATUS_NOT_SUPPORTED)) {
+			DBG_WARNING("vfs_get_notify_path(%s) failed\n",
+				fsp->fsp_name->base_name);
+			return status;
+		}
+		DBG_DEBUG("vfs_get_notify_path(%s) not supported\n",
+			  fsp->fsp_name->base_name);
+
+		fsp_fullbasepath(fsp, fullpath, sizeof(fullpath));
+
+		fsp->notify->path = talloc_strdup(fsp->notify, fullpath);
+		if (fsp->notify->path == NULL) {
+			return NT_STATUS_NO_MEMORY;
+		}
+	} else {
+		len = strlen(fsp->notify->path);
+		DBG_DEBUG("vfs_get_notify_path(%s) = %s\n",
+			  fsp->fsp_name->base_name, fsp->notify->path);
 	}
 
 	/*
@@ -564,10 +581,28 @@ void notify_fname(connection_struct *conn, uint32_t action, uint32_t filter,
 		  const char *path)
 {
 	struct notify_context *notify_ctx = conn->sconn->notify_ctx;
+	char *notify_path;
+	NTSTATUS status;
 
 	if (path[0] == '.' && path[1] == '/') {
 		path += 2;
 	}
+
+	status =
+	    SMB_VFS_GET_NOTIFY_PATH(conn, path, talloc_tos(), &notify_path);
+	if (NT_STATUS_IS_OK(status)) {
+		DBG_DEBUG("vfs_get_notify_path(%s) = %s\n", path, notify_path);
+		notify_trigger(notify_ctx, action, filter, NULL, notify_path);
+		TALLOC_FREE(notify_path);
+		return;
+	}
+
+	if (!NT_STATUS_EQUAL(status, NT_STATUS_NOT_SUPPORTED)) {
+		DBG_WARNING("vfs_get_notify_path(%s) failed\n", path);
+		return;
+	}
+
+	DBG_DEBUG("vfs_get_notify_path(%s) not supported\n", path);
 
 	notify_trigger(notify_ctx, action, filter, conn->connectpath, path);
 }
