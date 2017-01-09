@@ -690,6 +690,33 @@ static NTSTATUS fsctl_srv_req_resume_key(TALLOC_CTX *mem_ctx,
 	return NT_STATUS_OK;
 }
 
+static NTSTATUS fsctl_network_resiliency(TALLOC_CTX *mem_ctx,
+                                        struct tevent_context *ev,
+                                        struct files_struct *in_fsp,
+                                        DATA_BLOB *in_input,
+                                        uint32_t in_max_output,
+                                        DATA_BLOB *out_output)
+{
+       uint32_t in_timeout;
+
+       *out_output = data_blob_null;
+
+       if (in_fsp == NULL) {
+               return NT_STATUS_FILE_CLOSED;
+       }
+
+       if (in_input->length < 8) {
+               return NT_STATUS_INVALID_PARAMETER;
+       }
+
+       in_timeout = IVAL(in_input->data, 0);
+       if (in_timeout > 300000) {
+               return NT_STATUS_INVALID_PARAMETER;
+       }
+
+       return NT_STATUS_OK;
+}
+
 static void smb2_ioctl_network_fs_copychunk_done(struct tevent_req *subreq);
 
 struct tevent_req *smb2_ioctl_network_fs(uint32_t ctl_code,
@@ -765,6 +792,26 @@ struct tevent_req *smb2_ioctl_network_fs(uint32_t ctl_code,
 						  &state->out_output);
 		if (!tevent_req_nterror(req, status)) {
 			tevent_req_done(req);
+		}
+		return tevent_req_post(req, ev);
+		break;
+	case FSCTL_LMR_REQ_RESILIENCY:
+		if (!lp_fake_resilient_support(SNUM(state->fsp->conn))) 
+		{
+			if (IS_IPC(state->smbreq->conn)) {
+				status = NT_STATUS_FS_DRIVER_REQUIRED;
+			} else {
+				status = NT_STATUS_INVALID_DEVICE_REQUEST;
+			}
+		} else {
+			status = fsctl_network_resiliency(state, ev,
+							state->fsp,
+							&state->in_input,
+							state->in_max_output,
+							&state->out_output);
+		}
+		if (!tevent_req_nterror(req, status)) {
+				tevent_req_done(req);
 		}
 		return tevent_req_post(req, ev);
 		break;

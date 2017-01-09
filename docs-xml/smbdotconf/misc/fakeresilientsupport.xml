@@ -1,0 +1,13 @@
+<samba:parameter name="fake resilient support"
+                 context="S"
+                 type="boolean"
+                 xmlns:samba="http://www.samba.org/samba/DTD/samba-doc">
+<description>
+	<para>This parameter specifies whether Samba should
+	   fake resilient support, declaring that we support
+	   the missing features without actually implementing
+	   them.
+	</para>
+</description>
+<value type="default">no</value>
+</samba:parameter>
