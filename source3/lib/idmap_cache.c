@@ -271,6 +271,40 @@ bool idmap_cache_find_gid2sid(gid_t gid, struct dom_sid *sid, bool *expired)
 	return state.ret;
 }
 
+/*
+ * quick hack, instead of moving modules around to
+ * resolve circular dependencies...
+ */
+static bool _sid_check_is_unix_users(const struct dom_sid *sid)
+{
+	return dom_sid_equal(sid, &global_sid_Unix_Users);
+}
+
+static bool _sid_check_is_in_unix_users(const struct dom_sid *sid)
+{
+	struct dom_sid dom_sid;
+
+	sid_copy(&dom_sid, sid);
+	sid_split_rid(&dom_sid, NULL);
+
+	return _sid_check_is_unix_users(&dom_sid);
+}
+
+static bool _sid_check_is_unix_groups(const struct dom_sid *sid)
+{
+	return dom_sid_equal(sid, &global_sid_Unix_Groups);
+}
+
+static bool _sid_check_is_in_unix_groups(const struct dom_sid *sid)
+{
+	struct dom_sid dom_sid;
+
+	sid_copy(&dom_sid, sid);
+	sid_split_rid(&dom_sid, NULL);
+
+	return _sid_check_is_unix_groups(&dom_sid);
+}
+
 /**
  * Store a mapping in the idmap cache
  * @param[in] sid		the sid to map
@@ -318,8 +352,11 @@ void idmap_cache_set_sid2unixid(const struct dom_sid *sid, struct unixid *unix_i
 			/* negative xid mapping */
 			fstrcpy(value, "-");
 			timeout = lp_idmap_negative_cache_time();
-		}
-		else {
+		} else if (_sid_check_is_in_unix_users(sid) ||
+			   _sid_check_is_in_unix_groups(sid)) {
+			sid_to_fstring(value, sid);
+			timeout = lp_idmap_negative_cache_time();
+		} else {
 			sid_to_fstring(value, sid);
 			timeout = lp_idmap_cache_time();
 		}
