@@ -318,8 +318,11 @@ void idmap_cache_set_sid2unixid(const struct dom_sid *sid, struct unixid *unix_i
 			/* negative xid mapping */
 			fstrcpy(value, "-");
 			timeout = lp_idmap_negative_cache_time();
-		}
-		else {
+		} else if (sid_check_is_in_unix_users(sid) ||
+			   sid_check_is_in_unix_groups(sid)) {
+			sid_to_fstring(value, sid);
+			timeout = lp_idmap_negative_cache_time();
+		} else {
 			sid_to_fstring(value, sid);
 			timeout = lp_idmap_cache_time();
 		}
