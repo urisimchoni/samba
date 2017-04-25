@@ -4,9 +4,9 @@
 # currently needs to run in SMB1 mode, because it uses UNIX
 # extensions to fetch the UNIX owner of a file.
 
-if [ $# -lt 9 ]; then
+if [ $# -lt 10 ]; then
 cat <<EOF
-Usage: $0 SERVER USERNAME PASSWORD PREFIX SMBCLIENT SMBCACLS SHARE INH_WIN INH_UNIX <additional args>
+Usage: $0 SERVER USERNAME PASSWORD PREFIX SMBCLIENT SMBCACLS SHARE INH_WIN INH_UNIX SETUP_USERNAME <additional args>
 EOF
 exit 1;
 fi
@@ -20,10 +20,14 @@ SMBCACLS="$6"
 SHARE="$7"
 INH_WIN="$8"
 INH_UNIX="$9"
-shift 9
+SETUP_USERNAME="${10}"
+shift 10
 ADDARGS="$*"
 SMBCLIENT="$VALGRIND ${SMBCLIENT} ${ADDARGS}"
 SMBCACLS="$VALGRIND ${SMBCACLS} ${ADDARGS}"
+if [ -z "$SETUP_USERNAME" ] ; then
+SETUP_USERNAME=$USERNAME
+fi
 
 incdir=`dirname $0`/../../../testprogs/blackbox
 . $incdir/subunit.sh
@@ -42,11 +46,17 @@ create_file() {
 create_dir() {
     local share=$1
     local dname=$2
+    local user
     local rem_dirname=$(dirname $dname)
     local bname=$(basename $dname)
-    $SMBCLIENT //$SERVER/$share -U $USERNAME%$PASSWORD -c "cd $rem_dirname; rmdir $bname" 2>/dev/null
-    $SMBCLIENT //$SERVER/$share -U $USERNAME%$PASSWORD -c "cd $rem_dirname; ls" 2>/dev/null | grep "$dname" && exit 1
-    $SMBCLIENT //$SERVER/$share -U $USERNAME%$PASSWORD -c "cd $rem_dirname; mkdir $bname" 2>/dev/null || exit 1
+    if [ -n "$3" ] ; then
+        user=$3
+    else
+        user=$USERNAME
+    fi
+    $SMBCLIENT //$SERVER/$share -U $user%$PASSWORD -c "cd $rem_dirname; rmdir $bname" 2>/dev/null
+    $SMBCLIENT //$SERVER/$share -U $user%$PASSWORD -c "cd $rem_dirname; ls" 2>/dev/null | grep "$dname" && exit 1
+    $SMBCLIENT //$SERVER/$share -U $user%$PASSWORD -c "cd $rem_dirname; mkdir $bname" 2>/dev/null || exit 1
 }
 
 cleanup_file() {
@@ -136,8 +146,8 @@ else
 fi
 
 # SETUP
-testit "$TEST_LABEL - setup root dir" create_dir tmp tmp.$$
-testit "$TEST_LABEL - assign default ACL" $SMBCACLS //$SERVER/tmp tmp.$$ -U $USERNAME%$PASSWORD -S "REVISION:1,OWNER:$SERVER\force_user,GROUP:$SERVER\domusers,ACL:Everyone:ALLOWED/0x3/FULL" 2>/dev/null
+testit "$TEST_LABEL - setup root dir" create_dir tmp tmp.$$ $SETUP_USERNAME
+testit "$TEST_LABEL - assign default ACL" $SMBCACLS //$SERVER/tmp tmp.$$ -U $SETUP_USERNAME%$PASSWORD -S "REVISION:1,OWNER:$SERVER\force_user,GROUP:$SERVER\domusers,ACL:Everyone:ALLOWED/0x3/FULL" 2>/dev/null
 # END SETUP
 
 testit "$TEST_LABEL - create subdir under root" create_dir $SHARE tmp.$$/subdir
