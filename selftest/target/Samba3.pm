@@ -1682,6 +1682,14 @@ sub provision($$$$$$$$)
 	path = $shrdir
         force group = nogroup
         guest ok = yes
+[admin_user]
+	copy = tmp
+	admin users = user1
+[admin_user_no_inherit]
+	comment = share with no ACL inheritance and an admin user
+	copy = tmp
+	admin users = user1
+	vfs objects = fake_acls xattr_tdb streams_depot
 [ro-tmp]
 	path = $ro_shrdir
 	guest ok = yes
