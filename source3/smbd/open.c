@@ -887,18 +887,19 @@ NTSTATUS change_dir_owner(connection_struct *conn,
 	saved_dir = vfs_GetWd(ctx,conn);
 	if (!saved_dir) {
 		status = map_nt_error_from_unix(errno);
-		DEBUG(0,("change_dir_owner_to_parent: failed to get "
-			 "current working directory. Error was %s\n",
-			 strerror(errno)));
+		DBG_WARNING("failed to get "
+			    "current working directory. Error was %s\n",
+			    strerror(errno));
 		goto out;
 	}
 
 	/* Chdir into the new path. */
 	if (vfs_ChDir(conn, fname) == -1) {
 		status = map_nt_error_from_unix(errno);
-		DEBUG(0,("change_dir_owner_to_parent: failed to change "
-			 "current working directory to %s. Error "
-			 "was %s\n", fname, strerror(errno) ));
+		DBG_WARNING("failed to change "
+			    "current working directory to %s. Error "
+			    "was %s\n",
+			    fname, strerror(errno));
 		goto chdir;
 	}
 
@@ -911,28 +912,27 @@ NTSTATUS change_dir_owner(connection_struct *conn,
 	ret = SMB_VFS_STAT(conn, smb_fname_cwd);
 	if (ret == -1) {
 		status = map_nt_error_from_unix(errno);
-		DEBUG(0,("change_dir_owner_to_parent: failed to stat "
-			 "directory '.' (%s) Error was %s\n",
-			 fname, strerror(errno)));
+		DBG_WARNING("failed to stat "
+			    "directory '.' (%s) Error was %s\n",
+			    fname, strerror(errno));
 		goto chdir;
 	}
 
 	/* Ensure we're pointing at the same place. */
 	if (smb_fname_cwd->st.st_ex_dev != psbuf->st_ex_dev ||
 	    smb_fname_cwd->st.st_ex_ino != psbuf->st_ex_ino) {
-		DEBUG(0,("change_dir_owner_to_parent: "
-			 "device/inode on directory %s changed. "
-			 "Refusing to chown !\n", fname ));
+		DBG_WARNING("device/inode on directory %s changed. "
+			    "Refusing to chown !\n",
+			    fname);
 		status = NT_STATUS_ACCESS_DENIED;
 		goto chdir;
 	}
 
 	if (uid == smb_fname_cwd->st.st_ex_uid) {
 		/* Already this uid - no need to change. */
-		DEBUG(10,("change_dir_owner_to_parent: directory %s "
-			"is already owned by uid %d\n",
-			fname,
-			(int)smb_fname_cwd->st.st_ex_uid ));
+		DBG_DEBUG("directory %s "
+			  "is already owned by uid %d\n",
+			  fname, (int)smb_fname_cwd->st.st_ex_uid);
 		status = NT_STATUS_OK;
 		goto chdir;
 	}
@@ -942,15 +942,14 @@ NTSTATUS change_dir_owner(connection_struct *conn,
 	unbecome_root();
 	if (ret == -1) {
 		status = map_nt_error_from_unix(errno);
-		DEBUG(10, ("change_dir_owner_to_parent: failed to chown "
-			   "directory %s to parent directory uid %u. "
-			   "Error was %s\n",
-			   fname, (unsigned int)uid, strerror(errno)));
+		DBG_DEBUG("failed to chown "
+			  "directory %s to parent directory uid %u. "
+			  "Error was %s\n",
+			  fname, (unsigned int)uid, strerror(errno));
 	} else {
-		DEBUG(10,
-		      ("change_dir_owner_to_parent: changed ownership of new "
-		       "directory %s to parent directory uid %u.\n",
-		       fname, (unsigned int)uid));
+		DBG_DEBUG("changed ownership of new "
+			  "directory %s to parent directory uid %u.\n",
+			  fname, (unsigned int)uid);
 		/* Ensure the uid entry is updated. */
 		psbuf->st_ex_uid = uid;
 	}
