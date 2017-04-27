@@ -835,9 +835,7 @@ NTSTATUS change_dir_owner_to_parent(connection_struct *conn,
 				       const char *fname,
 				       SMB_STRUCT_STAT *psbuf)
 {
-	struct smb_filename *smb_fname_parent;
-	struct smb_filename *smb_fname_cwd = NULL;
-	char *saved_dir = NULL;
+	struct smb_filename *smb_fname_parent = NULL;
 	TALLOC_CTX *ctx = talloc_tos();
 	NTSTATUS status = NT_STATUS_OK;
 	int ret;
@@ -860,6 +858,24 @@ NTSTATUS change_dir_owner_to_parent(connection_struct *conn,
 			 strerror(errno)));
 		goto out;
 	}
+
+	status = change_dir_owner(conn, fname, psbuf,
+				  smb_fname_parent->st.st_ex_uid);
+out:
+	TALLOC_FREE(smb_fname_parent);
+	return status;
+}
+
+NTSTATUS change_dir_owner(connection_struct *conn,
+			  const char *fname,
+			  SMB_STRUCT_STAT *psbuf,
+			  uid_t uid)
+{
+	struct smb_filename *smb_fname_cwd = NULL;
+	char *saved_dir = NULL;
+	TALLOC_CTX *ctx = talloc_tos();
+	NTSTATUS status = NT_STATUS_OK;
+	int ret;
 
 	/* We've already done an lstat into psbuf, and we know it's a
 	   directory. If we can cd into the directory and the dev/ino
@@ -911,7 +927,7 @@ NTSTATUS change_dir_owner_to_parent(connection_struct *conn,
 		goto chdir;
 	}
 
-	if (smb_fname_parent->st.st_ex_uid == smb_fname_cwd->st.st_ex_uid) {
+	if (uid == smb_fname_cwd->st.st_ex_uid) {
 		/* Already this uid - no need to change. */
 		DEBUG(10,("change_dir_owner_to_parent: directory %s "
 			"is already owned by uid %d\n",
@@ -922,30 +938,26 @@ NTSTATUS change_dir_owner_to_parent(connection_struct *conn,
 	}
 
 	become_root();
-	ret = SMB_VFS_LCHOWN(conn,
-			smb_fname_cwd,
-			smb_fname_parent->st.st_ex_uid,
-			(gid_t)-1);
+	ret = SMB_VFS_LCHOWN(conn, smb_fname_cwd, uid, (gid_t)-1);
 	unbecome_root();
 	if (ret == -1) {
 		status = map_nt_error_from_unix(errno);
-		DEBUG(10,("change_dir_owner_to_parent: failed to chown "
-			  "directory %s to parent directory uid %u. "
-			  "Error was %s\n", fname,
-			  (unsigned int)smb_fname_parent->st.st_ex_uid,
-			  strerror(errno) ));
+		DEBUG(10, ("change_dir_owner_to_parent: failed to chown "
+			   "directory %s to parent directory uid %u. "
+			   "Error was %s\n",
+			   fname, (unsigned int)uid, strerror(errno)));
 	} else {
-		DEBUG(10,("change_dir_owner_to_parent: changed ownership of new "
-			"directory %s to parent directory uid %u.\n",
-			fname, (unsigned int)smb_fname_parent->st.st_ex_uid ));
+		DEBUG(10,
+		      ("change_dir_owner_to_parent: changed ownership of new "
+		       "directory %s to parent directory uid %u.\n",
+		       fname, (unsigned int)uid));
 		/* Ensure the uid entry is updated. */
-		psbuf->st_ex_uid = smb_fname_parent->st.st_ex_uid;
+		psbuf->st_ex_uid = uid;
 	}
 
  chdir:
 	vfs_ChDir(conn,saved_dir);
  out:
-	TALLOC_FREE(smb_fname_parent);
 	TALLOC_FREE(smb_fname_cwd);
 	return status;
 }
