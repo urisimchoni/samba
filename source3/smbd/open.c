@@ -780,6 +780,56 @@ void change_file_owner_to_parent(connection_struct *conn,
 	TALLOC_FREE(smb_fname_parent);
 }
 
+/****************************************************************************
+ Change the ownership of a file system object to that of the session user
+****************************************************************************/
+
+NTSTATUS take_ownership(connection_struct *conn, files_struct *fsp)
+{
+	struct user_struct *vuser =
+	    get_valid_user_struct(conn->sconn, conn->vuid);
+	uid_t my_uid = (uid_t)-1;
+	int ret = -1;
+	NTSTATUS status = NT_STATUS_UNSUCCESSFUL;
+
+	if (vuser == NULL) {
+		DBG_WARNING("No user found for vuid %llu\n",
+			    (unsigned long long)conn->vuid);
+		return NT_STATUS_UNSUCCESSFUL;
+	}
+
+	my_uid = vuser->session_info->unix_token->uid;
+
+	if (fsp->fsp_name->st.st_ex_uid == my_uid) {
+		/* Already this uid - no need to change. */
+		DBG_DEBUG("file %s "
+			  "is already owned by uid %d\n",
+			  fsp_str_dbg(fsp), (int)my_uid);
+		return NT_STATUS_OK;
+	}
+
+	become_root();
+	ret = SMB_VFS_FCHOWN(fsp, my_uid, (gid_t)-1);
+	unbecome_root();
+	if (ret == -1) {
+		status = map_nt_error_from_unix(errno);
+		DBG_ERR("failed to fchown "
+			"file %s to uid %u. Error "
+			"was %s\n",
+			fsp_str_dbg(fsp), (unsigned int)my_uid,
+			strerror(errno));
+	} else {
+		status = NT_STATUS_OK;
+		DBG_DEBUG("changed new file %s to "
+			  "uid %u.\n",
+			  fsp_str_dbg(fsp), (unsigned int)my_uid);
+		/* Ensure the uid entry is updated. */
+		fsp->fsp_name->st.st_ex_uid = my_uid;
+	}
+
+	return status;
+}
+
 NTSTATUS change_dir_owner_to_parent(connection_struct *conn,
 				       const char *inherit_from_dir,
 				       const char *fname,

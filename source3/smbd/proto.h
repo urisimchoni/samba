@@ -650,6 +650,7 @@ NTSTATUS fd_close(files_struct *fsp);
 void change_file_owner_to_parent(connection_struct *conn,
 				 const char *inherit_from_dir,
 				 files_struct *fsp);
+NTSTATUS take_ownership(connection_struct *conn, files_struct *fsp);
 NTSTATUS change_dir_owner_to_parent(connection_struct *conn,
 				    const char *inherit_from_dir,
 				    const char *fname,
