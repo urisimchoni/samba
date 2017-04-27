@@ -866,6 +866,25 @@ out:
 	return status;
 }
 
+static void take_dir_ownership(connection_struct *conn,
+			       const char *fname,
+			       SMB_STRUCT_STAT *psbuf)
+{
+	struct user_struct *vuser =
+	    get_valid_user_struct(conn->sconn, conn->vuid);
+	uid_t my_uid = (uid_t)-1;
+
+	if (vuser == NULL) {
+		DBG_WARNING("No user found for vuid %llu\n",
+			    (unsigned long long)conn->vuid);
+		return;
+	}
+
+	my_uid = vuser->session_info->unix_token->uid;
+
+	change_dir_owner(conn, fname, psbuf, my_uid);
+}
+
 NTSTATUS change_dir_owner(connection_struct *conn,
 			  const char *fname,
 			  SMB_STRUCT_STAT *psbuf,
@@ -3927,6 +3946,14 @@ static NTSTATUS mkdir_internal(connection_struct *conn,
 		change_dir_owner_to_parent(conn, parent_dir,
 					   smb_dname->base_name,
 					   &smb_dname->st);
+		need_re_stat = true;
+	} else if (conn->session_info->unix_token->uid == sec_initial_uid()) {
+		/* we're running as root for some reason
+		 * (admin user, backup intent),
+		 * let's ensure we have the right
+		 * owner
+		 */
+		take_dir_ownership(conn, smb_dname->base_name, &smb_dname->st);
 		need_re_stat = true;
 	}
 
