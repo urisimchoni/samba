@@ -1284,6 +1284,15 @@ static NTSTATUS open_file(files_struct *fsp,
 				change_file_owner_to_parent(conn, parent_dir,
 							    fsp);
 				need_re_stat = true;
+			} else if (conn->session_info->unix_token->uid ==
+				   sec_initial_uid()) {
+				/* we're running as root for some reason
+				 * (admin user, backup intent),
+				 * let's ensure we have the right
+				 * owner
+				 */
+				take_ownership(conn, fsp);
+				need_re_stat = true;
 			}
 
 			if (need_re_stat) {
