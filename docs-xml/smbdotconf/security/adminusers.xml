@@ -5,11 +5,16 @@
 <description>
     <para>This is a list of users who will be granted 
     administrative privileges on the share. This means that they 
-    will do all file operations as the super-user (root).</para>
+    will be allowed to perform any file operation irrespective of
+    POSIX or NT file permissions. Internally, this is implemented
+    by running as root.</para>
 
-    <para>You should use this option very carefully, as any user in 
-    this list will be able to do anything they like on the share, 
-    irrespective of file permissions.</para>
+    <para>Although new files and directories are created by root,
+    their POSIX owner is set to the uid of the user (unless the
+    owner is inherited - see <smbconfoption name="inherit owner"/>)
+    </para>
+
+    <para>You should use this option very carefully.</para>
 
 </description>
 
