@@ -62,6 +62,22 @@ authentication, SMB and RPC authorization is covered, however password
 changes are not at this stage, and this support is not currently
 backed by a testsuite.
 
+POSIX owner of files created by admin users
+-------------------------------------------
+
+POSIX ownership of files and directories created by admin users is set
+to the uid of the user that created the file or directory.
+
+Admin users are users that appear in the "admin users" smb.conf list,
+or are members of a group in that list. smbd runs as root when serving
+requests on behalf of those users. Up until now, the owner of files
+created by those users has been root (unless some mechanism such as
+"inherit acls", or some configuration parameter such as "inherit owner"
+caused it to be set otherwise). Setting the owner to be uid of the user
+(as if smbd did not run as root) makes running as root transparent to
+the user, and creates better user experience when fetching the ACL of
+the user, if that ACL is computed from the POSIX metadata.
+
 Parameter changes
 -----------------
 
