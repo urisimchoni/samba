@@ -4681,10 +4681,16 @@ static bool run_rename(int dummy)
 	static struct cli_state *cli1;
 	const char *fname = "\\test.txt";
 	const char *fname1 = "\\test1.txt";
+	const char *dname = "\\ren_subdir";
+	// const char *dname1 = "\\ren_subdir1";
+	const char *indir = "\\ren_subdir\\test.txt";
 	bool correct = True;
+	bool expect_success = true;
 	uint16_t fnum1;
 	uint16_t attr;
 	NTSTATUS status;
+	uint8_t buf[10] = {0};
+	off_t fsize = 0;
 
 	printf("starting rename test\n");
 
@@ -4694,6 +4700,8 @@ static bool run_rename(int dummy)
 
 	cli_unlink(cli1, fname, FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_HIDDEN);
 	cli_unlink(cli1, fname1, FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_HIDDEN);
+	cli_unlink(cli1, indir, FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_HIDDEN);
+	cli_rmdir(cli1, dname);
 
 	status = cli_ntcreate(cli1, fname, 0, GENERIC_READ_ACCESS,
 			      FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ,
@@ -4881,6 +4889,135 @@ static bool run_rename(int dummy)
 		} else {
 			printf("Renamed file %s has archive bit set\n", fname1);
 		}
+	}
+
+	cli_unlink(cli1, fname, FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_HIDDEN);
+	cli_unlink(cli1, fname1, FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_HIDDEN);
+
+	/*
+	 * rename (move) into a subdir using FILE_RENAME_INFORMATION
+	 * This works with SMB2 and fails with NT1
+	 */
+	status = cli_mkdir(cli1, dname);
+	if (!NT_STATUS_IS_OK(status)) {
+		printf("Sixth test mkdir failed - %s\n", nt_errstr(status));
+		return False;
+	}
+
+	status = cli_ntcreate(cli1, fname, 0, GENERIC_READ_ACCESS,
+			      FILE_ATTRIBUTE_NORMAL,
+			      FILE_SHARE_DELETE | FILE_SHARE_READ,
+			      FILE_OVERWRITE_IF, 0, 0, &fnum1, NULL);
+	if (!NT_STATUS_IS_OK(status)) {
+		printf("Sixth open failed - %s\n", nt_errstr(status));
+		return False;
+	}
+
+	expect_success = false;
+	if (smbXcli_conn_protocol(cli1->conn) >= PROTOCOL_SMB2_02) {
+		expect_success = true;
+	}
+
+	status = cli_rename(cli1, fname, indir, true);
+	if (!NT_STATUS_IS_OK(status)) {
+		printf("Sixth rename failed %s - %s\n",
+		       expect_success ? "- this should have succeeded"
+				      : "(this is correct)",
+		       nt_errstr(status));
+		if (expect_success) {
+			correct = False;
+		}
+	} else {
+		printf("Sixth rename succeeded %s\n",
+		       expect_success ? "(this is correct)"
+				      : "- this should have succeeded");
+		if (!expect_success) {
+			correct = False;
+		}
+	}
+
+	status = cli_close(cli1, fnum1);
+	if (!NT_STATUS_IS_OK(status)) {
+		printf("close - 6 failed (%s)\n", nt_errstr(status));
+		return False;
+	}
+
+	cli_unlink(cli1, fname, FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_HIDDEN);
+	cli_unlink(cli1, indir, FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_HIDDEN);
+	cli_rmdir(cli1, dname);
+
+	/*
+	 * rename and replace using FILE_RENAME_INFORMATION
+	 */
+
+	/* set up a file whose length is 10 bytes - this will be
+	 * replaced by a zero-length file
+	 */
+	status = cli_ntcreate(cli1, fname1, 0, GENERIC_WRITE_ACCESS,
+			      FILE_ATTRIBUTE_NORMAL, FILE_SHARE_NONE,
+			      FILE_OVERWRITE_IF, 0, 0, &fnum1, NULL);
+	if (!NT_STATUS_IS_OK(status)) {
+		printf("Seventh create to-replace file failed - %s\n",
+		       nt_errstr(status));
+		return False;
+	}
+	status = cli_writeall(cli1, fnum1, 0, buf, 0, sizeof(buf), NULL);
+	if (!NT_STATUS_IS_OK(status)) {
+		printf("write - 7 - to-replace- failed (%s)\n",
+		       nt_errstr(status));
+		return False;
+	}
+	status = cli_close(cli1, fnum1);
+	if (!NT_STATUS_IS_OK(status)) {
+		printf("close - 7 - to-replace- failed (%s)\n",
+		       nt_errstr(status));
+		return False;
+	}
+	status = cli_getatr(cli1, fname1, NULL, &fsize, NULL);
+	if (!NT_STATUS_IS_OK(status)) {
+		printf("getatr - 7 - to-replace- failed (%s)\n",
+		       nt_errstr(status));
+		return False;
+	}
+	if ((size_t)fsize != sizeof(buf)) {
+		printf("getatr - 7 - to-replace- incorrect file size\n");
+		return False;
+	}
+
+	status = cli_ntcreate(cli1, fname, 0, GENERIC_READ_ACCESS,
+			      FILE_ATTRIBUTE_NORMAL,
+			      FILE_SHARE_DELETE | FILE_SHARE_READ,
+			      FILE_OVERWRITE_IF, 0, 0, &fnum1, NULL);
+	if (!NT_STATUS_IS_OK(status)) {
+		printf("Seventh open failed - %s\n", nt_errstr(status));
+		return False;
+	}
+
+	status = cli_rename(cli1, fname, fname1, true);
+	if (!NT_STATUS_IS_OK(status)) {
+		printf(
+		    "Seventh rename failed - this should have succeeded - %s\n",
+		    nt_errstr(status));
+		correct = False;
+	} else {
+		printf("Seventh rename succeeded (this is correct)\n");
+	}
+
+	status = cli_close(cli1, fnum1);
+	if (!NT_STATUS_IS_OK(status)) {
+		printf("close - 7 failed (%s)\n", nt_errstr(status));
+		return False;
+	}
+
+	status = cli_getatr(cli1, fname1, NULL, &fsize, NULL);
+	if (!NT_STATUS_IS_OK(status)) {
+		printf("getatr - 7 - replaced - failed (%s)\n",
+		       nt_errstr(status));
+		return False;
+	}
+	if (fsize != 0) {
+		printf("getatr - 7 - replaced - incorrect file size\n");
+		return False;
 	}
 
 	cli_unlink(cli1, fname, FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_HIDDEN);
