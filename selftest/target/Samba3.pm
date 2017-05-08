@@ -1356,6 +1356,9 @@ sub provision($$$$$$$$)
 	my $nosymlinks_shrdir="$shrdir/nosymlinks";
 	push(@dirs,$nosymlinks_shrdir);
 
+	my $protect_tstdir="$shrdir/protect";
+	push(@dirs,$protect_tstdir);
+
 	# this gets autocreated by winbindd
 	my $wbsockdir="$prefix_abs/winbindd";
 
@@ -1985,6 +1988,11 @@ sub provision($$$$$$$$)
 [compound_find]
 	copy = tmp
 	smbd:find async delay usec = 10000
+
+[protect]
+	path = $protect_tstdir
+	vfs objects = protect
+	protect:dirs = \"dir1\", \"bar/baz\"
 	";
 	close(CONF);
 
