@@ -4679,11 +4679,12 @@ static bool run_xcopy(int dummy)
 static bool run_rename(int dummy)
 {
 	static struct cli_state *cli1;
-	const char *fname = "\\test.txt";
-	const char *fname1 = "\\test1.txt";
+	const char *fname = "test.txt";
+	const char *fname1 = "test1.txt";
 	const char *dname = "\\ren_subdir";
-	// const char *dname1 = "\\ren_subdir1";
+	const char *dname1 = "\\ren_subdir1";
 	const char *indir = "\\ren_subdir\\test.txt";
+	const char *indir1 = "\\ren_subdir\\test1.txt";
 	bool correct = True;
 	bool expect_success = true;
 	uint16_t fnum1;
@@ -4950,10 +4951,16 @@ static bool run_rename(int dummy)
 	 * rename and replace using FILE_RENAME_INFORMATION
 	 */
 
+	status = cli_mkdir(cli1, dname);
+	if (!NT_STATUS_IS_OK(status)) {
+		printf("Seventh test mkdir failed - %s\n", nt_errstr(status));
+		return False;
+	}
+
 	/* set up a file whose length is 10 bytes - this will be
 	 * replaced by a zero-length file
 	 */
-	status = cli_ntcreate(cli1, fname1, 0, GENERIC_WRITE_ACCESS,
+	status = cli_ntcreate(cli1, indir1, 0, GENERIC_WRITE_ACCESS,
 			      FILE_ATTRIBUTE_NORMAL, FILE_SHARE_NONE,
 			      FILE_OVERWRITE_IF, 0, 0, &fnum1, NULL);
 	if (!NT_STATUS_IS_OK(status)) {
@@ -4973,7 +4980,7 @@ static bool run_rename(int dummy)
 		       nt_errstr(status));
 		return False;
 	}
-	status = cli_getatr(cli1, fname1, NULL, &fsize, NULL);
+	status = cli_getatr(cli1, indir1, NULL, &fsize, NULL);
 	if (!NT_STATUS_IS_OK(status)) {
 		printf("getatr - 7 - to-replace- failed (%s)\n",
 		       nt_errstr(status));
@@ -4984,7 +4991,7 @@ static bool run_rename(int dummy)
 		return False;
 	}
 
-	status = cli_ntcreate(cli1, fname, 0, GENERIC_READ_ACCESS,
+	status = cli_ntcreate(cli1, indir, 0, GENERIC_READ_ACCESS,
 			      FILE_ATTRIBUTE_NORMAL,
 			      FILE_SHARE_DELETE | FILE_SHARE_READ,
 			      FILE_OVERWRITE_IF, 0, 0, &fnum1, NULL);
@@ -4993,7 +5000,7 @@ static bool run_rename(int dummy)
 		return False;
 	}
 
-	status = cli_rename(cli1, fname, fname1, true);
+	status = cli_rename(cli1, indir, fname1, true);
 	if (!NT_STATUS_IS_OK(status)) {
 		printf(
 		    "Seventh rename failed - this should have succeeded - %s\n",
@@ -5009,7 +5016,7 @@ static bool run_rename(int dummy)
 		return False;
 	}
 
-	status = cli_getatr(cli1, fname1, NULL, &fsize, NULL);
+	status = cli_getatr(cli1, indir1, NULL, &fsize, NULL);
 	if (!NT_STATUS_IS_OK(status)) {
 		printf("getatr - 7 - replaced - failed (%s)\n",
 		       nt_errstr(status));
@@ -5022,6 +5029,9 @@ static bool run_rename(int dummy)
 
 	cli_unlink(cli1, fname, FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_HIDDEN);
 	cli_unlink(cli1, fname1, FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_HIDDEN);
+	cli_unlink(cli1, indir, FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_HIDDEN);
+	cli_unlink(cli1, indir1, FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_HIDDEN);
+	cli_rmdir(cli1, dname1);
 
 	if (!torture_close_connection(cli1)) {
 		correct = False;

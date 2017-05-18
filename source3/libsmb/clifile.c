@@ -1221,6 +1221,12 @@ NTSTATUS cli_rename(struct cli_state *cli,
 		goto fail;
 	}
 
+	/* SMB2 is pickier about pathnames. Ensure it doesn't
+	   start in a '\' */
+	if (*fname_dst == '\\') {
+		fname_dst++;
+	}
+
 	req = cli_rename_send(frame, ev, cli, fname_src, fname_dst, replace);
 	if (req == NULL) {
 		status = NT_STATUS_NO_MEMORY;
