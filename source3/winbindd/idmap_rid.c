@@ -39,6 +39,8 @@ static NTSTATUS idmap_rid_initialize(struct idmap_domain *dom)
 {
 	struct idmap_rid_context *ctx;
 
+	dom->ignore_sid_type = true;
+
 	ctx = talloc_zero(dom, struct idmap_rid_context);
 	if (ctx == NULL) {
 		DEBUG(0, ("Out of memory!\n"));
