@@ -37,6 +37,10 @@ struct wb_sids2xids_state {
 	struct dom_sid *non_cached;
 	uint32_t num_non_cached;
 
+	struct dom_sid *non_resolved;
+	unsigned *res_idx;
+	uint32_t num_non_resolved;
+
 	/*
 	 * Domain array to use for the idmap call. The output from
 	 * lookupsids cannot be used directly since for migrated
@@ -126,11 +130,29 @@ struct tevent_req *wb_sids2xids_send(TALLOC_CTX *mem_ctx,
 		return tevent_req_post(req, ev);
 	}
 
+	state->non_resolved =
+	    talloc_array(state, struct dom_sid, state->num_non_cached);
+	if (tevent_req_nomem(state->non_resolved, req)) {
+		return tevent_req_post(req, ev);
+	}
+
+	state->res_idx = talloc_array(state, unsigned, state->num_non_cached);
+	if (tevent_req_nomem(state->res_idx, req)) {
+		return tevent_req_post(req, ev);
+	}
+
 	state->ids.num_ids = state->num_non_cached;
 	state->ids.ids = talloc_array(state, struct wbint_TransID,
 				      state->num_non_cached);
 	if (tevent_req_nomem(state->ids.ids, req)) {
 		return tevent_req_post(req, ev);
+	}
+
+	for (i=0; i<state->num_non_cached; i++) {
+		state->res_idx[state->num_non_resolved] = i;
+		sid_copy(&state->non_resolved[state->num_non_resolved],
+			 &state->non_cached[i]);
+		++state->num_non_resolved;
 	}
 
 	subreq = wb_lookupsids_send(state, ev, state->non_cached,
@@ -184,11 +206,12 @@ static void wb_sids2xids_lookupsids_done(struct tevent_req *subreq)
 		return;
 	}
 
-	for (i=0; i<state->num_non_cached; i++) {
-		const struct dom_sid *sid = &state->non_cached[i];
+	for (i = 0; i < state->num_non_resolved; i++) {
+		unsigned nc_idx = state->res_idx[i];
+		const struct dom_sid *sid = &state->non_cached[nc_idx];
 		struct dom_sid dom_sid;
 		struct lsa_TranslatedName *n = &names->names[i];
-		struct wbint_TransID *t = &state->ids.ids[i];
+		struct wbint_TransID *t = &state->ids.ids[nc_idx];
 		int domain_index;
 		const char *domain_name = NULL;
 
