@@ -43,6 +43,7 @@ struct idmap_domain {
 	uint32_t low_id;
 	uint32_t high_id;
 	bool read_only;
+	bool ignore_sid_type; /* whether sid->xid needs to know sid type */
 	void *private_data;
 };
 
