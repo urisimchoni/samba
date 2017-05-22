@@ -63,6 +63,7 @@ static bool wb_sids2xids_in_cache(struct dom_sid *sid, struct id_map *map);
 static void wb_sids2xids_lookupsids_done(struct tevent_req *subreq);
 static void wb_sids2xids_done(struct tevent_req *subreq);
 static void wb_sids2xids_gotdc(struct tevent_req *subreq);
+static bool wb_sids2xids_next(struct tevent_req *req);
 
 struct tevent_req *wb_sids2xids_send(TALLOC_CTX *mem_ctx,
 				     struct tevent_context *ev,
@@ -167,7 +168,6 @@ static void wb_sids2xids_lookupsids_done(struct tevent_req *subreq)
 		req, struct wb_sids2xids_state);
 	struct lsa_RefDomainList *domains = NULL;
 	struct lsa_TransNameArray *names = NULL;
-	struct winbindd_child *child;
 	NTSTATUS status;
 	int i;
 
@@ -237,12 +237,22 @@ static void wb_sids2xids_lookupsids_done(struct tevent_req *subreq)
 	TALLOC_FREE(names);
 	TALLOC_FREE(domains);
 
+	wb_sids2xids_next(req);
+}
+
+static bool wb_sids2xids_next(struct tevent_req *req)
+{
+	struct wb_sids2xids_state *state = tevent_req_data(
+		req, struct wb_sids2xids_state);
+	struct tevent_req *subreq;
+	struct winbindd_child *child;
+
 	child = idmap_child();
 
 	state->dom_ids = wb_sids2xids_extract_for_domain_index(
 		state, &state->ids, state->dom_index);
 	if (tevent_req_nomem(state->dom_ids, req)) {
-		return;
+		return false;
 	}
 
 	state->idmap_dom = (struct lsa_RefDomainList) {
@@ -255,9 +265,11 @@ static void wb_sids2xids_lookupsids_done(struct tevent_req *subreq)
 		state, state->ev, child->binding_handle, &state->idmap_dom,
 		state->dom_ids);
 	if (tevent_req_nomem(subreq, req)) {
-		return;
+		return false;
 	}
 	tevent_req_set_callback(subreq, wb_sids2xids_done, req);
+
+	return true;
 }
 
 static enum id_type lsa_SidType_to_id_type(const enum lsa_SidType sid_type)
@@ -289,7 +301,6 @@ static void wb_sids2xids_done(struct tevent_req *subreq)
 	struct wb_sids2xids_state *state = tevent_req_data(
 		req, struct wb_sids2xids_state);
 	NTSTATUS status, result;
-	struct winbindd_child *child;
 
 	struct wbint_TransIDArray *src, *dst;
 	uint32_t i, src_idx;
@@ -352,27 +363,7 @@ static void wb_sids2xids_done(struct tevent_req *subreq)
 		return;
 	}
 
-	child = idmap_child();
-
-	state->dom_ids = wb_sids2xids_extract_for_domain_index(
-		state, &state->ids, state->dom_index);
-	if (tevent_req_nomem(state->dom_ids, req)) {
-		return;
-	}
-
-	state->idmap_dom = (struct lsa_RefDomainList) {
-		.count = 1,
-		.domains = &state->idmap_doms.domains[state->dom_index],
-		.max_size = 1
-	};
-
-	subreq = dcerpc_wbint_Sids2UnixIDs_send(
-		state, state->ev, child->binding_handle, &state->idmap_dom,
-		state->dom_ids);
-	if (tevent_req_nomem(subreq, req)) {
-		return;
-	}
-	tevent_req_set_callback(subreq, wb_sids2xids_done, req);
+	wb_sids2xids_next(req);
 }
 
 static void wb_sids2xids_gotdc(struct tevent_req *subreq)
