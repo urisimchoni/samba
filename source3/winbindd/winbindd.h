@@ -132,6 +132,7 @@ struct winbindd_child {
 	struct tevent_timer *machine_password_change_event;
 
 	const struct winbindd_child_dispatch_table *table;
+	void (*init_fn)(struct winbindd_child *child);
 };
 
 /* Structures to hold per domain information */

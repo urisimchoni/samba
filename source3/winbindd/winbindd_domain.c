@@ -74,6 +74,7 @@ void setup_domain_child(struct winbindd_domain *domain)
         for (i=0; i<lp_winbind_max_domain_connections(); i++) {
                 setup_child(domain, &domain->children[i],
 			    domain_dispatch_table,
+			    NULL,
                             "log.wb", domain->name);
 		domain->children[i].domain = domain;
 	}

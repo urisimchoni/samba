@@ -52,5 +52,6 @@ void init_idmap_child(void)
 {
 	setup_child(NULL, &static_idmap_child,
 		    idmap_dispatch_table,
+		    NULL,
 		    "log.winbindd", "idmap");
 }
