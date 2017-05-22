@@ -1393,6 +1393,7 @@ static void winbindd_register_handlers(struct messaging_context *msg_ctx,
 
 	netsamlogon_cache_init(); /* Non-critical */
 
+	init_idmap_child();
 	/* clear the cached list of trusted domains */
 
 	wcache_tdc_clear();
@@ -1402,7 +1403,6 @@ static void winbindd_register_handlers(struct messaging_context *msg_ctx,
 		exit(1);
 	}
 
-	init_idmap_child();
 	init_locator_child();
 
 	smb_nscd_flush_user_cache();
