@@ -23,6 +23,7 @@
 #include "../libcli/security/security.h"
 #include "idmap_cache.h"
 #include "librpc/gen_ndr/ndr_winbind_c.h"
+#include "lib/util_sid_passdb.h"
 #include "librpc/gen_ndr/ndr_netlogon.h"
 #include "lsa.h"
 
@@ -151,6 +152,7 @@ struct tevent_req *wb_sids2xids_send(TALLOC_CTX *mem_ctx,
 	for (i=0; i<state->num_non_cached; i++) {
 		struct dom_sid dom_sid;
 		struct wbint_TransID *t = &state->ids.ids[i];
+		int domain_index;
 
 		sid_copy(&dom_sid, &state->non_cached[i]);
 		sid_split_rid(&dom_sid, &t->rid);
@@ -159,18 +161,45 @@ struct tevent_req *wb_sids2xids_send(TALLOC_CTX *mem_ctx,
 		t->xid.type = t->type;
 		t->domain_index = -1;
 
+		if (sid_check_is_for_passdb(&state->non_cached[i])) {
+			/*
+			 * It doesn't really matter what domain
+			 * name we put here, as long as it doesn't
+			 * collide with another "real" domain
+			 */
+			DBG_DEBUG(
+			    "sid %s handled by passdb and does not require "
+			    "resolution\n",
+			    sid_string_dbg(&state->non_cached[i]));
+			domain_index = init_lsa_ref_domain_list(
+			    state, &state->idmap_doms, "", &dom_sid);
+			if (domain_index == -1) {
+				tevent_req_oom(req);
+				return tevent_req_post(req, ev);
+			}
+			t->domain_index = domain_index;
+			continue;
+		}
+
+		DBG_DEBUG("sid %s requires resolution before mapping\n",
+			  sid_string_dbg(&state->non_cached[i]));
 		state->res_idx[state->num_non_resolved] = i;
 		sid_copy(&state->non_resolved[state->num_non_resolved],
 			 &state->non_cached[i]);
 		++state->num_non_resolved;
 	}
 
-	subreq = wb_lookupsids_send(state, ev, state->non_cached,
-				    state->num_non_cached);
-	if (tevent_req_nomem(subreq, req)) {
-		return tevent_req_post(req, ev);
+	if (state->num_non_resolved != 0) {
+		subreq = wb_lookupsids_send(state, ev, state->non_resolved,
+					    state->num_non_resolved);
+		if (tevent_req_nomem(subreq, req)) {
+			return tevent_req_post(req, ev);
+		}
+		tevent_req_set_callback(subreq, wb_sids2xids_lookupsids_done,
+					req);
+	} else {
+		wb_sids2xids_next(req);
 	}
-	tevent_req_set_callback(subreq, wb_sids2xids_lookupsids_done, req);
 	return req;
 }
 
