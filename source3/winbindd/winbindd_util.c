@@ -38,6 +38,7 @@
 
 static struct winbindd_domain *
 add_trusted_domain_from_tdc(const struct winbindd_tdc_domain *tdc);
+static void init_idmap_done(struct tevent_req *req);
 
 /**
  * @file winbindd_util.c
@@ -151,6 +152,7 @@ add_trusted_domain_from_tdc(const struct winbindd_tdc_domain *tdc)
 	int role = lp_server_role();
 	const char *domain_name = tdc->domain_name;
 	const struct dom_sid *sid = &tdc->sid;
+	struct tevent_req *req;
 
 	if (is_null_sid(sid)) {
 		sid = NULL;
@@ -280,11 +282,38 @@ add_trusted_domain_from_tdc(const struct winbindd_tdc_domain *tdc)
 
 	setup_domain_child(domain);
 
+	req = wb_init_idmap_backend_send(domain, winbind_event_context(),
+					 domain->name, &domain->sid);
+	if (!req) {
+		smb_panic("failed calling idmap child to initialize backend");
+	}
+	tevent_req_set_callback(req, init_idmap_done, domain);
+
 	DEBUG(2,
 	      ("Added domain %s %s %s\n", domain->name, domain->alt_name,
 	       !is_null_sid(&domain->sid) ? sid_string_dbg(&domain->sid) : ""));
 
 	return domain;
+}
+
+static void init_idmap_done(struct tevent_req *req)
+{
+	struct winbindd_domain *domain =
+	    tevent_req_callback_data(req, struct winbindd_domain);
+	NTSTATUS status;
+	bool require_sid_type = true;
+
+	status = wb_init_idmap_backend_recv(req, &require_sid_type);
+	TALLOC_FREE(req);
+	if (!NT_STATUS_IS_OK(status)) {
+		DBG_WARNING("Failed initializing idmap for domain %s\n",
+			    domain->name);
+		return;
+	}
+
+	DBG_DEBUG("Domain %s id-mapping %s sid type\n", domain->name,
+		  require_sid_type ? "requires" : "does not require");
+	domain->idmap_require_sid_type = require_sid_type;
 }
 
 bool domain_is_forest_root(const struct winbindd_domain *domain)
