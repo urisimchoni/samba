@@ -32,6 +32,7 @@
 
 static NTSTATUS idmap_pdb_init(struct idmap_domain *dom)
 {	
+	dom->ignore_sid_type = true;
 	return NT_STATUS_OK;
 }
 
