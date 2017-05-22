@@ -149,6 +149,16 @@ struct tevent_req *wb_sids2xids_send(TALLOC_CTX *mem_ctx,
 	}
 
 	for (i=0; i<state->num_non_cached; i++) {
+		struct dom_sid dom_sid;
+		struct wbint_TransID *t = &state->ids.ids[i];
+
+		sid_copy(&dom_sid, &state->non_cached[i]);
+		sid_split_rid(&dom_sid, &t->rid);
+		t->type = ID_TYPE_BOTH;
+		t->xid.id = UINT32_MAX;
+		t->xid.type = t->type;
+		t->domain_index = -1;
+
 		state->res_idx[state->num_non_resolved] = i;
 		sid_copy(&state->non_resolved[state->num_non_resolved],
 			 &state->non_cached[i]);
@@ -243,7 +253,7 @@ static void wb_sids2xids_lookupsids_done(struct tevent_req *subreq)
 		}
 
 		sid_copy(&dom_sid, sid);
-		sid_split_rid(&dom_sid, &t->rid);
+		sid_split_rid(&dom_sid, NULL);
 		t->type = lsa_SidType_to_id_type(n->sid_type);
 		domain_index = init_lsa_ref_domain_list(
 			state, &state->idmap_doms, domain_name, &dom_sid);
@@ -253,7 +263,6 @@ static void wb_sids2xids_lookupsids_done(struct tevent_req *subreq)
 		}
 		t->domain_index = domain_index;
 
-		t->xid.id = UINT32_MAX;
 		t->xid.type = t->type;
 	}
 
