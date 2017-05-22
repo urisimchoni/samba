@@ -906,6 +906,12 @@ NTSTATUS wb_lookupsids_recv(struct tevent_req *req, TALLOC_CTX *mem_ctx,
 			    struct lsa_RefDomainList **domains,
 			    struct lsa_TransNameArray **names);
 
+struct tevent_req *wb_init_idmap_backend_send(TALLOC_CTX *mem_ctx,
+					      struct tevent_context *ev,
+					      const char *domain,
+					      struct dom_sid *sid);
+NTSTATUS wb_init_idmap_backend_recv(struct tevent_req *req,
+				    bool *require_sid_type);
 struct tevent_req *wb_sids2xids_send(TALLOC_CTX *mem_ctx,
 				     struct tevent_context *ev,
 				     const struct dom_sid *sids,

@@ -484,3 +484,90 @@ static struct wbint_TransIDArray *wb_sids2xids_extract_for_domain_index(
 
 	return ret;
 }
+
+struct wb_init_idmap_backend_state {
+	char *domain;
+	struct dom_sid sid;
+	uint32_t require_sid_type;
+};
+
+static void wb_init_idmap_backend_done(struct tevent_req *subreq);
+
+struct tevent_req *wb_init_idmap_backend_send(TALLOC_CTX *mem_ctx,
+					      struct tevent_context *ev,
+					      const char *domain,
+					      struct dom_sid *sid)
+{
+	struct tevent_req *req, *subreq;
+	struct wb_init_idmap_backend_state *state;
+	struct winbindd_child *child;
+
+	child = idmap_child();
+
+	req = tevent_req_create(mem_ctx, &state,
+				struct wb_init_idmap_backend_state);
+	if (req == NULL) {
+		return NULL;
+	}
+
+	if (sid) {
+		sid_copy(&state->sid, sid);
+	}
+	state->domain = talloc_strdup(state, domain);
+	if (tevent_req_nomem(state->domain, req)) {
+		return tevent_req_post(req, ev);
+	}
+
+	subreq = dcerpc_wbint_IDMapInitDomain_send(
+	    state, ev, child->binding_handle, state->domain, &state->sid,
+	    &state->require_sid_type);
+	if (tevent_req_nomem(subreq, req)) {
+		return tevent_req_post(req, ev);
+	}
+
+	tevent_req_set_callback(subreq, wb_init_idmap_backend_done, req);
+
+	return req;
+}
+
+static void wb_init_idmap_backend_done(struct tevent_req *subreq)
+{
+	struct tevent_req *req =
+	    tevent_req_callback_data(subreq, struct tevent_req);
+	struct wb_init_idmap_backend_state *state =
+	    tevent_req_data(req, struct wb_init_idmap_backend_state);
+	NTSTATUS status, result;
+
+	status = dcerpc_wbint_IDMapInitDomain_recv(subreq, state, &result);
+	TALLOC_FREE(subreq);
+
+	if (tevent_req_nterror(req, status)) {
+		DBG_INFO("ipc idmap init call for domain %s failed - %s\n",
+			 state->domain, nt_errstr(status));
+		return;
+	}
+
+	if (tevent_req_nterror(req, result)) {
+		DBG_INFO("idmap init for domain %s failed - %s\n",
+			 state->domain, nt_errstr(result));
+		return;
+	}
+
+	tevent_req_done(req);
+}
+
+NTSTATUS wb_init_idmap_backend_recv(struct tevent_req *req,
+				    bool *require_sid_type)
+{
+	struct wb_init_idmap_backend_state *state =
+	    tevent_req_data(req, struct wb_init_idmap_backend_state);
+	NTSTATUS status;
+
+	if (tevent_req_is_nterror(req, &status)) {
+		return status;
+	}
+
+	*require_sid_type = (state->require_sid_type != 0);
+
+	return NT_STATUS_OK;
+}
