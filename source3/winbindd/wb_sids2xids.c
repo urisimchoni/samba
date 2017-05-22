@@ -126,6 +126,13 @@ struct tevent_req *wb_sids2xids_send(TALLOC_CTX *mem_ctx,
 		return tevent_req_post(req, ev);
 	}
 
+	state->ids.num_ids = state->num_non_cached;
+	state->ids.ids = talloc_array(state, struct wbint_TransID,
+				      state->num_non_cached);
+	if (tevent_req_nomem(state->ids.ids, req)) {
+		return tevent_req_post(req, ev);
+	}
+
 	subreq = wb_lookupsids_send(state, ev, state->non_cached,
 				    state->num_non_cached);
 	if (tevent_req_nomem(subreq, req)) {
@@ -174,13 +181,6 @@ static void wb_sids2xids_lookupsids_done(struct tevent_req *subreq)
 	status = wb_lookupsids_recv(subreq, state, &domains, &names);
 	TALLOC_FREE(subreq);
 	if (tevent_req_nterror(req, status)) {
-		return;
-	}
-
-	state->ids.num_ids = state->num_non_cached;
-	state->ids.ids = talloc_array(state, struct wbint_TransID,
-				      state->num_non_cached);
-	if (tevent_req_nomem(state->ids.ids, req)) {
 		return;
 	}
 
