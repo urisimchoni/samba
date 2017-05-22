@@ -37,6 +37,9 @@ NTSTATUS idmap_allocate_gid(struct unixid *id);
 NTSTATUS idmap_backend_unixids_to_sids(struct id_map **maps,
 				       const char *domain_name);
 struct idmap_domain *idmap_find_domain(const char *domname);
+NTSTATUS idmap_get_backend_params(const char *domain_name,
+				  bool *require_sid_type);
+NTSTATUS idmap_set_domain_sid(const char *domain_name, struct dom_sid *sid);
 
 /* The following definitions come from winbindd/idmap_nss.c  */
 

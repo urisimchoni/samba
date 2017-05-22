@@ -44,6 +44,7 @@ struct idmap_domain {
 	uint32_t high_id;
 	bool read_only;
 	bool ignore_sid_type; /* whether sid->xid needs to know sid type */
+	struct dom_sid sid;   /* some backends need this */
 	void *private_data;
 };
 

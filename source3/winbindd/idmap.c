@@ -633,3 +633,54 @@ NTSTATUS idmap_backend_unixids_to_sids(struct id_map **maps,
 
 	return status;
 }
+
+NTSTATUS idmap_get_backend_params(const char *domain_name,
+				  bool *require_sid_type)
+{
+	struct idmap_domain *dom = NULL;
+	bool ok;
+
+	ok = idmap_init();
+	if (!ok) {
+		return NT_STATUS_UNSUCCESSFUL;
+	}
+
+	if (strequal(domain_name, get_global_sam_name())) {
+		dom = passdb_idmap_domain;
+	}
+	if (dom == NULL) {
+		dom = idmap_find_domain(domain_name);
+	}
+	if (dom == NULL) {
+		return NT_STATUS_UNSUCCESSFUL;
+	}
+
+	*require_sid_type = !dom->ignore_sid_type;
+
+	return NT_STATUS_OK;
+}
+
+NTSTATUS idmap_set_domain_sid(const char *domain_name, struct dom_sid *sid)
+{
+	struct idmap_domain *dom = NULL;
+	bool ok;
+
+	ok = idmap_init();
+	if (!ok) {
+		return NT_STATUS_UNSUCCESSFUL;
+	}
+
+	if (strequal(domain_name, get_global_sam_name())) {
+		dom = passdb_idmap_domain;
+	}
+	if (dom == NULL) {
+		dom = idmap_find_domain(domain_name);
+	}
+	if (dom == NULL) {
+		return NT_STATUS_UNSUCCESSFUL;
+	}
+
+	sid_copy(&dom->sid, sid);
+
+	return NT_STATUS_OK;
+}
