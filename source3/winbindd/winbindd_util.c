@@ -271,6 +271,8 @@ add_trusted_domain_from_tdc(const struct winbindd_tdc_domain *tdc)
 		}
 	}
 
+	domain->idmap_require_sid_type = true;
+
 	/* Link to domain list */
 	DLIST_ADD_END(_domain_list, domain);
 

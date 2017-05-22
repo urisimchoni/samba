@@ -155,6 +155,7 @@ struct winbindd_domain {
 	bool startup;                          /* are we in the first 30 seconds after startup_time ? */
 
 	bool can_do_ncacn_ip_tcp;
+	bool idmap_require_sid_type;	       /* does idmap sid->id need to know sid type */
 
 	/*
 	 * Lookup methods for this domain (LDAP or RPC). The backend
