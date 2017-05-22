@@ -118,6 +118,20 @@ NTSTATUS _wbint_LookupName(struct pipes_struct *p, struct wbint_LookupName *r)
 	return status;
 }
 
+NTSTATUS _wbint_IDMapInitDomain(struct pipes_struct *p,
+				struct wbint_IDMapInitDomain *r)
+{
+	bool require_sid_type = true;
+	NTSTATUS status;
+
+	status = idmap_get_backend_params(r->in.domain, &require_sid_type);
+	if (NT_STATUS_IS_OK(status)) {
+		*r->out.require_sid_type = require_sid_type;
+		status = idmap_set_domain_sid(r->in.domain, r->in.sid);
+	}
+	return status;
+}
+
 NTSTATUS _wbint_Sids2UnixIDs(struct pipes_struct *p,
 			     struct wbint_Sids2UnixIDs *r)
 {

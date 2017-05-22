@@ -51,6 +51,12 @@ interface winbind
 	[size_is(num_ids)] wbint_TransID ids[];
     } wbint_TransIDArray;
 
+    NTSTATUS wbint_IDMapInitDomain(
+	[in,string,charset(UTF8)] char *domain,
+	[in] dom_sid *sid,
+	[out] boolean32 *require_sid_type
+	);
+
     NTSTATUS wbint_Sids2UnixIDs(
 	[in] lsa_RefDomainList *domains,
 	[in,out] wbint_TransIDArray *ids
