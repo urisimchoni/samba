@@ -52,5 +52,6 @@ void init_locator_child(void)
 {
 	setup_child(NULL, &static_locator_child,
 		    locator_dispatch_table,
+		    NULL,
 		    "log.winbindd", "locator");
 }

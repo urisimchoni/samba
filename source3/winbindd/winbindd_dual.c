@@ -520,8 +520,10 @@ static void child_process_request(struct winbindd_child *child,
 	state->response->result = WINBINDD_ERROR;
 }
 
-void setup_child(struct winbindd_domain *domain, struct winbindd_child *child,
+void setup_child(struct winbindd_domain *domain,
+		 struct winbindd_child *child,
 		 const struct winbindd_child_dispatch_table *table,
+		 void (*init_fn)(struct winbindd_child *child),
 		 const char *logprefix,
 		 const char *logname)
 {
@@ -559,6 +561,7 @@ void setup_child(struct winbindd_domain *domain, struct winbindd_child *child,
 	child->sock = -1;
 	child->domain = domain;
 	child->table = table;
+	child->init_fn = init_fn;
 	child->queue = tevent_queue_create(NULL, "winbind_child");
 	SMB_ASSERT(child->queue != NULL);
 	child->binding_handle = wbint_binding_handle(NULL, domain, child);
@@ -1464,6 +1467,11 @@ static bool fork_domain_child(struct winbindd_child *child)
 		child->next = child->prev = NULL;
 		DLIST_ADD(winbindd_children, child);
 		child->sock = fdpair[1];
+
+		if (child->init_fn) {
+			child->init_fn(child);
+		}
+
 		return True;
 	}
 
