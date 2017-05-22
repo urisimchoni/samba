@@ -153,6 +153,7 @@ struct tevent_req *wb_sids2xids_send(TALLOC_CTX *mem_ctx,
 		struct dom_sid dom_sid;
 		struct wbint_TransID *t = &state->ids.ids[i];
 		int domain_index;
+		struct winbindd_domain *domain = NULL;
 
 		sid_copy(&dom_sid, &state->non_cached[i]);
 		sid_split_rid(&dom_sid, &t->rid);
@@ -173,6 +174,22 @@ struct tevent_req *wb_sids2xids_send(TALLOC_CTX *mem_ctx,
 			    sid_string_dbg(&state->non_cached[i]));
 			domain_index = init_lsa_ref_domain_list(
 			    state, &state->idmap_doms, "", &dom_sid);
+			if (domain_index == -1) {
+				tevent_req_oom(req);
+				return tevent_req_post(req, ev);
+			}
+			t->domain_index = domain_index;
+			continue;
+		}
+
+		domain = find_domain_from_sid_noinit(&dom_sid);
+		if (domain != NULL && !domain->idmap_require_sid_type) {
+			DBG_DEBUG("sid %s belonging to domain [%s] does not "
+				  "require resolution\n",
+				  sid_string_dbg(&state->non_cached[i]),
+				  domain->name);
+			domain_index = init_lsa_ref_domain_list(
+			    state, &state->idmap_doms, domain->name, &dom_sid);
 			if (domain_index == -1) {
 				tevent_req_oom(req);
 				return tevent_req_post(req, ev);
