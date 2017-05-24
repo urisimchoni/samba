@@ -224,6 +224,8 @@ typedef enum _vfs_op_type {
 	SMB_VFS_OP_DURABLE_DISCONNECT,
 	SMB_VFS_OP_DURABLE_RECONNECT,
 
+	SMB_VFS_OP_GET_NOTIFY_PATH,
+
 	SMB_VFS_OP_READDIR_ATTR,
 
 	/* This should always be last enum value */
@@ -348,6 +350,7 @@ static struct {
 	{ SMB_VFS_OP_DURABLE_COOKIE, "durable_cookie" },
 	{ SMB_VFS_OP_DURABLE_DISCONNECT, "durable_disconnect" },
 	{ SMB_VFS_OP_DURABLE_RECONNECT, "durable_reconnect" },
+	{ SMB_VFS_OP_GET_NOTIFY_PATH,	"get_notify_path" },
 	{ SMB_VFS_OP_READDIR_ATTR,      "readdir_attr" },
 	{ SMB_VFS_OP_LAST, NULL }
 };
@@ -2378,6 +2381,19 @@ static bool smb_full_audit_aio_force(struct vfs_handle_struct *handle,
 	return result;
 }
 
+static NTSTATUS smb_full_audit_get_notify_path(struct vfs_handle_struct *handle,
+					       const char *path,
+					       TALLOC_CTX *mem_ctx,
+					       char **notify_path)
+{
+	NTSTATUS result;
+	result =
+	    SMB_VFS_NEXT_GET_NOTIFY_PATH(handle, path, mem_ctx, notify_path);
+	do_log(SMB_VFS_OP_GET_NOTIFY_PATH, NT_STATUS_IS_OK(result), handle,
+	       "%s", path);
+	return result;
+}
+
 static NTSTATUS smb_full_audit_durable_cookie(struct vfs_handle_struct *handle,
 				struct files_struct *fsp,
 				TALLOC_CTX *mem_ctx,
@@ -2557,6 +2573,7 @@ static struct vfs_fn_pointers vfs_full_audit_fns = {
 	.durable_cookie_fn = smb_full_audit_durable_cookie,
 	.durable_disconnect_fn = smb_full_audit_durable_disconnect,
 	.durable_reconnect_fn = smb_full_audit_durable_reconnect,
+	.get_notify_path_fn = smb_full_audit_get_notify_path,
 	.readdir_attr_fn = smb_full_audit_readdir_attr
 
 };
