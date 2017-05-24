@@ -35,6 +35,10 @@
 ^samba3.raw.acls nfs4acl_xattr-special.inheritance\(nt4_dc\)
 ^samba3.raw.acls nfs4acl_xattr-special.inherit_creator_owner\(nt4_dc\)
 ^samba3.raw.acls nfs4acl_xattr-special.inherit_creator_group\(nt4_dc\)
+# The following similar two fail in Ctera fork, because passdb backend is used for well known SIDs.
+# To pass, NT-Authority/Authenticated Users SID must be group-mapped.
+^samba3.raw.acls nfs4acl_xattr-simple.sd\(nt4_dc\)
+^samba3.raw.acls nfs4acl_xattr-special.sd\(nt4_dc\)
 ^samba3.base.delete.deltest16a
 ^samba3.base.delete.deltest17a
 ^samba3.unix.whoami anonymous connection.whoami\(ad_dc\) # We need to resolve if we should be including SID_NT_WORLD and SID_NT_NETWORK in this token
