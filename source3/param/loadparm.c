@@ -858,6 +858,7 @@ static void init_globals(struct loadparm_context *lp_ctx, bool reinit_globals)
 
 	/* By default no shares out of the registry */
 	Globals.registry_shares = false;
+	Globals.rpc_modify_share_security = true;
 
 	Globals.min_receivefile_size = 0;
 
