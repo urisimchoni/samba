@@ -536,6 +536,11 @@ for env in ["nt4_dc", "nt4_member", "ad_dc", "ad_member", "s4member", "chgdcpass
 
     plantestsuite("samba.ntlm_auth.(%s:local)" % env, "%s:local" % env, [os.path.join(samba3srcdir, "script/tests/test_ntlm_auth_s3.sh"), valgrindify(python), samba3srcdir, ntlm_auth3,  '$DOMAIN', '$DC_USERNAME', '$DC_PASSWORD', configuration])
 
+for env in ["ad_member_idmap_rid_passdb"]:
+    plantestsuite(
+        "samba.wbinfo_sids2xids.(%s:local)" % env, "%s:local" % env,
+        [os.path.join(samba3srcdir, "script/tests/test_wbinfo_sids2xids.sh"), "S-1-1-0"])
+
 for env in ["s4member_dflt_domain", "s4member"]:
     for cmd in ["id", "getent"]:
         users = ["$DC_USERNAME", "$DC_USERNAME@$REALM"]
