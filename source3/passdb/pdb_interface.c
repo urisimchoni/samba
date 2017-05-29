@@ -1232,11 +1232,6 @@ bool pdb_sid_to_id(const struct dom_sid *sid, struct unixid *id)
 	struct pdb_methods *pdb = pdb_get_methods();
 	bool ret;
 
-	/* only ask the backend if it is responsible */
-	if (!sid_check_object_is_for_passdb(sid)) {
-		return false;
-	}
-
 	ret = pdb->sid_to_id(pdb, sid, id);
 
 	if (ret == true) {
