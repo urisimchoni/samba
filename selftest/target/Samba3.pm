@@ -674,6 +674,98 @@ sub setup_ad_member_idmap_rid($$$$)
 	return $ret;
 }
 
+sub setup_ad_member_idmap_rid_passdb($$$$)
+{
+	my ($self, $prefix, $dcvars) = @_;
+
+	# If we didn't build with ADS, pretend this env was never available
+	if (not $self->have_ads()) {
+	        return "UNKNOWN";
+	}
+
+	print "PROVISIONING S3 AD MEMBER WITH idmap_rid and idmap_passdb config...";
+
+	my $member_options = "
+	security = ads
+	workgroup = $dcvars->{DOMAIN}
+	realm = $dcvars->{REALM}
+	idmap config * : backend = passdb
+	idmap config * : range = 0-1999999
+	idmap config $dcvars->{DOMAIN} : backend = rid
+	idmap config $dcvars->{DOMAIN} : range = 2000000-2999999
+";
+
+	my $ret = $self->provision($prefix,
+				   "IDMAPRPDBMEMBER",
+				   "loCalMemberPass",
+				   $member_options,
+				   $dcvars->{SERVER_IP},
+				   $dcvars->{SERVER_IPV6});
+
+	$ret or return undef;
+
+	$ret->{DOMAIN} = $dcvars->{DOMAIN};
+	$ret->{REALM} = $dcvars->{REALM};
+
+	my $ctx;
+	my $prefix_abs = abs_path($prefix);
+	$ctx = {};
+	$ctx->{krb5_conf} = "$prefix_abs/lib/krb5.conf";
+	$ctx->{domain} = $dcvars->{DOMAIN};
+	$ctx->{realm} = $dcvars->{REALM};
+	$ctx->{dnsname} = lc($dcvars->{REALM});
+	$ctx->{kdc_ipv4} = $dcvars->{SERVER_IP};
+	$ctx->{kdc_ipv6} = $dcvars->{SERVER_IPV6};
+	$ctx->{krb5_ccname} = "$prefix_abs/krb5cc_%{uid}";
+	Samba::mk_krb5_conf($ctx, "");
+
+	$ret->{KRB5_CONFIG} = $ctx->{krb5_conf};
+
+	my $net = Samba::bindir_path($self, "net");
+	my $cmd = "";
+	$cmd .= "SOCKET_WRAPPER_DEFAULT_IFACE=\"$ret->{SOCKET_WRAPPER_DEFAULT_IFACE}\" ";
+	if (defined($ret->{RESOLV_WRAPPER_CONF})) {
+		$cmd .= "RESOLV_WRAPPER_CONF=\"$ret->{RESOLV_WRAPPER_CONF}\" ";
+	} else {
+		$cmd .= "RESOLV_WRAPPER_HOSTS=\"$ret->{RESOLV_WRAPPER_HOSTS}\" ";
+	}
+	$cmd .= "KRB5_CONFIG=\"$ret->{KRB5_CONFIG}\" ";
+	$cmd .= "SELFTEST_WINBINDD_SOCKET_DIR=\"$ret->{SELFTEST_WINBINDD_SOCKET_DIR}\" ";
+	$cmd .= "$net join $ret->{CONFIGURATION}";
+	$cmd .= " -U$dcvars->{USERNAME}\%$dcvars->{PASSWORD}";
+
+	if (system($cmd) != 0) {
+	    warn("Join failed\n$cmd");
+	    return undef;
+	}
+
+	# We need world access to this share, as otherwise the domain
+	# administrator from the AD domain provided by Samba4 can't
+	# access the share for tests.
+	chmod 0777, "$prefix/share";
+
+	my $gp_ret = system(Samba::bindir_path($self, "net") ." $ret->{CONFIGURATION} groupmap add sid=S-1-5-32-545 ntgroup=Users unixgroup=ux_users type=builtin");
+	if ($gp_ret != 0) {
+	    return undef;
+	}
+
+	if (not $self->check_or_start($ret, "yes", "yes", "yes")) {
+		return undef;
+	}
+
+	$ret->{DC_SERVER} = $dcvars->{SERVER};
+	$ret->{DC_SERVER_IP} = $dcvars->{SERVER_IP};
+	$ret->{DC_SERVER_IPV6} = $dcvars->{SERVER_IPV6};
+	$ret->{DC_NETBIOSNAME} = $dcvars->{NETBIOSNAME};
+	$ret->{DC_USERNAME} = $dcvars->{USERNAME};
+	$ret->{DC_PASSWORD} = $dcvars->{PASSWORD};
+
+	# Special case, this is called from Samba4.pm but needs to use the Samba3 check_env and get_log_env
+	$ret->{target} = $self;
+
+	return $ret;
+}
+
 sub setup_simpleserver($$)
 {
 	my ($self, $path) = @_;
@@ -1491,6 +1583,7 @@ sub provision($$$$$$$$)
 	my ($gid_nobody, $gid_nogroup, $gid_root, $gid_domusers, $gid_domadmins);
 	my ($gid_userdup, $gid_everyone);
 	my ($gid_force_user);
+	my ($gid_ux_users);
 	my ($uid_user1);
 	my ($uid_user2);
 
@@ -1511,7 +1604,7 @@ sub provision($$$$$$$$)
 	$uid_user1 = $max_uid - 9;
 	$uid_user2 = $max_uid - 10;
 
-	if ($unix_gids[0] < 0xffff - 8) {
+	if ($unix_gids[0] < 0xffff - 9) {
 		$max_gid = 0xffff;
 	} else {
 		$max_gid = $unix_gids[0];
@@ -1525,6 +1618,7 @@ sub provision($$$$$$$$)
 	$gid_userdup = $max_gid - 6;
 	$gid_everyone = $max_gid - 7;
 	$gid_force_user = $max_gid - 8;
+	$gid_ux_users = $max_gid - 9;
 
 	##
 	## create conffile
@@ -2031,6 +2125,7 @@ domadmins:X:$gid_domadmins:
 userdup:x:$gid_userdup:$unix_name
 everyone:x:$gid_everyone:
 force_user:x:$gid_force_user:
+ux_users:x:$gid_ux_users:
 ";
 	if ($unix_gids[0] != 0) {
 		print GROUP "root:x:$gid_root:

@@ -2103,6 +2103,12 @@ sub setup_env($$$)
 		}
 		return $target3->setup_ad_member_idmap_rid("$path/ad_member_idmap_rid",
 							   $self->{vars}->{ad_dc});
+	} elsif ($envname eq "ad_member_idmap_rid_passdb") {
+		if (not defined($self->{vars}->{ad_dc})) {
+			$self->setup_ad_dc("$path/ad_dc");
+		}
+		return $target3->setup_ad_member_idmap_rid_passdb("$path/ad_member_idmap_rid_passdb",
+							   $self->{vars}->{ad_dc});
 	} elsif ($envname eq "none") {
 		return $self->setup_none("$path/none");
 	} else {
