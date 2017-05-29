@@ -3,12 +3,15 @@
 import sys,os,subprocess
 
 
-if len(sys.argv) != 3:
-    print "Usage: test_wbinfo_sids2xids_int.py wbinfo net"
+if len(sys.argv) < 3:
+    print "Usage: test_wbinfo_sids2xids_int.py wbinfo net [strict-sid,...]"
     sys.exit(1)
 
 wbinfo = sys.argv[1]
 netcmd = sys.argv[2]
+strict_sids = []
+if len(sys.argv) > 3:
+    strict_sids = sys.argv[3].split(',')
 
 def flush_cache():
     os.system(netcmd + " cache flush")
@@ -41,7 +44,9 @@ uids=[]
 idtypes = []
 
 for line in sids2xids.split('\n'):
-    result = line.split(' ')[2:]
+    result = line.split(' ')
+    sid = result[0]
+    result = result[2:]
     idtypes.append(result[0])
 
     gid = None
@@ -53,6 +58,10 @@ for line in sids2xids.split('\n'):
     elif result[0] == 'uid/gid':
         gid = result[1]
         uid = result[1]
+    elif sid in strict_sids:
+        print "A mapping has failed: %s\n" % (line)
+        flush_cache()
+        sys.exit(1)
 
     if gid == '-1':
         gid = ''
